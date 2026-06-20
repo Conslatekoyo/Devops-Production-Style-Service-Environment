@@ -1,0 +1,19 @@
+[Unit]
+Description=Service B - Internal Relay
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/production-services/services/service-b
+ExecStart=/usr/bin/node index.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=SERVICE_C_URL=http://service-c.internal:3003
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=service-b
+
+[Install]
+WantedBy=multi-user.target
