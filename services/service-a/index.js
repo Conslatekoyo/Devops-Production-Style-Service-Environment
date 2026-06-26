@@ -2,7 +2,8 @@ const express = require('express');
 const crypto = require('crypto');
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
+const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const SERVICE_NAME = 'service-a';
 const SERVICE_B_URL = process.env.SERVICE_B_URL || 'http://service-b.internal:3002';
 
@@ -33,6 +34,10 @@ function trackStatus(code) {
   metrics.status_codes[code] = (metrics.status_codes[code] || 0) + 1;
 }
 
+function clientIp(req) {
+  return req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress;
+}
+
 function log(entry) {
   const record = { timestamp: new Date().toISOString(), service: SERVICE_NAME, ...entry };
   process.stdout.write(JSON.stringify(record) + '\n');
@@ -42,7 +47,7 @@ app.use(express.json());
 
 app.get('/health', (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
-  log({ event: 'health_check', request_id: requestId, method: 'GET', path: '/health', status: 200 });
+  log({ event: 'health_check', request_id: requestId, method: 'GET', path: '/health', status: 200, client_ip: clientIp(req) });
   res.json({
     service: SERVICE_NAME,
     status: 'healthy',
@@ -66,11 +71,16 @@ app.get('/metrics', (req, res) => {
   });
 });
 
-app.get('/greet-service-b', async (req, res) => {
+// POST: this endpoint triggers a downstream call to service-b and a callback
+// from service-c. GET is intentionally not used here since the request causes
+// side effects (outbound calls, pending-callback state, a response that
+// depends on a separate inbound POST from service-c).
+app.post('/greet-service-b', async (req, res) => {
   const reqStart = Date.now();
   const requestId = req.headers['x-request-id'] || crypto.randomUUID();
+  const ip = clientIp(req);
   metrics.requests_total++;
-  log({ event: 'request_received', request_id: requestId, method: 'GET', path: '/greet-service-b' });
+  log({ event: 'request_received', request_id: requestId, method: 'POST', path: '/greet-service-b', client_ip: ip });
 
   const callbackPromise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -82,9 +92,10 @@ app.get('/greet-service-b', async (req, res) => {
 
   try {
     const response = await fetch(`${SERVICE_B_URL}/greet`, {
+      method: 'POST',
       headers: { 'X-Request-ID': requestId }
     });
-    const forwardData = await response.json();
+    await response.json();
     log({
       event: 'request_forwarded',
       request_id: requestId,
@@ -137,7 +148,8 @@ app.post('/greeting-rcvd', (req, res) => {
     source_service: body.source_service,
     method: 'POST',
     path: '/greeting-rcvd',
-    status: 200
+    status: 200,
+    client_ip: clientIp(req)
   });
 
   const pending = pendingCallbacks.get(requestId);
@@ -155,10 +167,10 @@ app.use((req, res) => {
   metrics.requests_total++;
   metrics.requests_failed++;
   trackStatus(404);
-  log({ event: 'route_not_found', request_id: requestId, method: req.method, path: req.path, status: 404 });
+  log({ event: 'route_not_found', request_id: requestId, method: req.method, path: req.path, status: 404, client_ip: clientIp(req) });
   res.status(404).json({ error: 'Not found', path: req.path });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  log({ event: 'server_started', message: `${SERVICE_NAME} listening on port ${PORT}`, port: PORT });
+app.listen(PORT, BIND_HOST, () => {
+  log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT, bind_host: BIND_HOST });
 });
