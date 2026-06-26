@@ -10,6 +10,7 @@ ExecStart=/usr/bin/node index.js
 Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
+Environment=BIND_HOST=127.0.0.1
 Environment=SERVICE_A_URL=http://service-a.internal:3001
 StandardOutput=journal
 StandardError=journal

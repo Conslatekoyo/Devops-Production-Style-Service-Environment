@@ -77,8 +77,9 @@ ufw default deny incoming > /dev/null 2>&1
 ufw default allow outgoing > /dev/null 2>&1
 ufw allow ssh > /dev/null 2>&1
 ufw allow 80/tcp > /dev/null 2>&1
-# Ports 3002 and 3003 are NOT opened — internal only
-# Port 3001 is NOT opened — accessed via Nginx on port 80
+# Ports 3001, 3002, and 3003 are NOT opened.
+# They are bound to 127.0.0.1 in the application code (BIND_HOST), so they
+# are not reachable from outside the VM even if UFW were misconfigured.
 ufw --force enable > /dev/null 2>&1
 echo "  UFW enabled: SSH (22) and HTTP (80) allowed, ports 3001-3003 blocked from external"
 
@@ -105,12 +106,12 @@ echo "  nginx: $NGINX_STATUS"
 echo ""
 echo "Testing health endpoints..."
 curl -sf http://localhost/service-a/health && echo ""
-curl -sf http://service-b.internal:3002/health && echo ""
-curl -sf http://service-c.internal:3003/health && echo ""
+curl -sf http://127.0.0.1:3002/health && echo ""
+curl -sf http://127.0.0.1:3003/health && echo ""
 
 echo ""
 echo "Testing full request flow..."
-curl -sf http://localhost/service-a/greet-service-b && echo ""
+curl -sf -X POST http://localhost/service-a/greet-service-b && echo ""
 
 echo ""
 echo "=== All checks passed ==="

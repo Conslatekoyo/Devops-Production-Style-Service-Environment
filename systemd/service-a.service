@@ -1,7 +1,7 @@
 [Unit]
 Description=Service A - Public Gateway
 After=network.target service-b.service service-c.service
-Requires=service-b.service service-c.service
+Wants=service-b.service service-c.service
 
 [Service]
 Type=simple
@@ -11,6 +11,7 @@ ExecStart=/usr/bin/node index.js
 Restart=on-failure
 RestartSec=3
 Environment=NODE_ENV=production
+Environment=BIND_HOST=127.0.0.1
 Environment=SERVICE_B_URL=http://service-b.internal:3002
 StandardOutput=journal
 StandardError=journal

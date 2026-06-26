@@ -210,7 +210,7 @@ The `request_id` appears in: Nginx access log → Service A (`request_received`,
 
 ## Systemd
 
-- **Dependency order:** A `Requires` and starts `After` B and C. If B or C stops, A stops too.
+- **Dependency order:** A starts `After` B and C, and `Wants` them as soft dependencies — systemd starts B and C first if not already running, but A is not forced down if one later stops. A detects an unreachable dependency in its own request handling and returns a 502, rather than relying on systemd to take it down.
 - **Auto-restart:** `Restart=on-failure`, `RestartSec=3`
 - **Boot persistence:** All services enabled via `systemctl enable`, start automatically on boot.
 

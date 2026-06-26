@@ -11,7 +11,6 @@ NC='\033[0m'
 check_service() {
   local name=$1
   local url=$2
-  local response
   local http_code
 
   http_code=$(curl -sf -o /dev/null -w '%{http_code}' --max-time 3 "$url" 2>/dev/null)
@@ -52,13 +51,17 @@ run_checks() {
 
   echo "Health Endpoints:"
   check_service "Service A (via Nginx)" "http://localhost/service-a/health" || ((failures++))
-  check_service "Service B (direct)"    "http://service-b.internal:3002/health" || ((failures++))
-  check_service "Service C (direct)"    "http://service-c.internal:3003/health" || ((failures++))
+  check_service "Service B (loopback)"  "http://127.0.0.1:3002/health" || ((failures++))
+  check_service "Service C (loopback)"  "http://127.0.0.1:3003/health" || ((failures++))
   echo ""
 
-  echo "Full Flow Test:"
+  echo "Binding Proof (services should be on 127.0.0.1 only, Nginx on 0.0.0.0):"
+  sudo ss -tulpen | grep -E ':80|:3001|:3002|:3003' || echo -e "  ${YELLOW}?${NC} ss returned no matches"
+  echo ""
+
+  echo "Full Flow Test (POST):"
   local flow_response
-  flow_response=$(curl -sf --max-time 15 "http://localhost/service-a/greet-service-b" 2>/dev/null)
+  flow_response=$(curl -sf -X POST --max-time 15 "http://localhost/service-a/greet-service-b" 2>/dev/null)
   if echo "$flow_response" | grep -q '"status":"success"'; then
     local req_id
     req_id=$(echo "$flow_response" | python3 -c "import sys,json; print(json.load(sys.stdin)['request_id'])" 2>/dev/null)
@@ -74,7 +77,7 @@ run_checks() {
     local name=${svc%:*}
     local port=${svc#*:}
     local metrics_resp
-    metrics_resp=$(curl -sf --max-time 3 "http://localhost:$port/metrics" 2>/dev/null)
+    metrics_resp=$(curl -sf --max-time 3 "http://127.0.0.1:$port/metrics" 2>/dev/null)
     if [ -n "$metrics_resp" ]; then
       local uptime reqs
       uptime=$(echo "$metrics_resp" | python3 -c "import sys,json; print(json.load(sys.stdin)['uptime_seconds'])" 2>/dev/null)
@@ -92,6 +95,7 @@ run_checks() {
   else
     echo -e "  ${YELLOW}!${NC} UFW is not active"
   fi
+  echo ""
 
   echo "DNS Resolution:"
   for host in service-a.internal service-b.internal service-c.internal; do

@@ -1,7 +1,8 @@
 const express = require('express');
 
 const app = express();
-const PORT = 3003;
+const PORT = process.env.PORT || 3003;
+const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const SERVICE_NAME = 'service-c';
 const SERVICE_A_URL = process.env.SERVICE_A_URL || 'http://service-a.internal:3001';
 const startTime = Date.now();
@@ -29,6 +30,10 @@ function trackStatus(code) {
   metrics.status_codes[code] = (metrics.status_codes[code] || 0) + 1;
 }
 
+function clientIp(req) {
+  return req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress;
+}
+
 function log(entry) {
   const record = { timestamp: new Date().toISOString(), service: SERVICE_NAME, ...entry };
   process.stdout.write(JSON.stringify(record) + '\n');
@@ -38,7 +43,7 @@ app.use(express.json());
 
 app.get('/health', (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
-  log({ event: 'health_check', request_id: requestId, method: 'GET', path: '/health', status: 200 });
+  log({ event: 'health_check', request_id: requestId, method: 'GET', path: '/health', status: 200, client_ip: clientIp(req) });
   res.json({
     service: SERVICE_NAME,
     status: 'healthy',
@@ -61,11 +66,13 @@ app.get('/metrics', (req, res) => {
   });
 });
 
-app.get('/greet-c', async (req, res) => {
+// POST: receives the forwarded request from service-b and sends the callback
+// to service-a. Kept consistent with the POST-based chain end to end.
+app.post('/greet-c', async (req, res) => {
   const reqStart = Date.now();
   const requestId = req.headers['x-request-id'] || 'none';
   metrics.requests_total++;
-  log({ event: 'request_received', request_id: requestId, method: 'GET', path: '/greet-c', source: 'service-b' });
+  log({ event: 'request_received', request_id: requestId, method: 'POST', path: '/greet-c', source: 'service-b', client_ip: clientIp(req) });
 
   let callbackSent = false;
   try {
@@ -110,10 +117,10 @@ app.use((req, res) => {
   metrics.requests_total++;
   metrics.requests_failed++;
   trackStatus(404);
-  log({ event: 'route_not_found', request_id: requestId, method: req.method, path: req.path, status: 404 });
+  log({ event: 'route_not_found', request_id: requestId, method: req.method, path: req.path, status: 404, client_ip: clientIp(req) });
   res.status(404).json({ error: 'Not found', path: req.path });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  log({ event: 'server_started', message: `${SERVICE_NAME} listening on port ${PORT}`, port: PORT });
+app.listen(PORT, BIND_HOST, () => {
+  log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT, bind_host: BIND_HOST });
 });
