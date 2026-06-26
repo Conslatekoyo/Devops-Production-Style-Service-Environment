@@ -287,7 +287,85 @@ curl -H "X-Request-ID: test-123" http://service-b.internal:3002/greet
 curl -H "X-Request-ID: test-123" http://service-c.internal:3003/greet-c
 ```
 
-## Uninstall
+## Running with Docker Compose
+
+The same production flow can run in Docker Compose instead of on a VM with systemd.
+
+### Start the system
+
+```bash
+docker compose up --build -d
+```
+
+### Test the public route
+
+```bash
+# Health check via Nginx
+curl http://localhost:8080/service-a/health
+
+# Full request flow (A -> B -> C -> A callback)
+curl -X POST http://localhost:8080/service-a/greet-service-b
+```
+
+### Prove B and C are internal
+
+From the host, these should fail (connection refused / timeout):
+
+```bash
+curl --connect-timeout 3 http://localhost:3002/health
+curl --connect-timeout 3 http://localhost:3003/health
+```
+
+From inside the Docker network, they work:
+
+```bash
+docker compose exec service-a curl http://service-b:3002/health
+docker compose exec service-b curl http://service-c:3003/health
+```
+
+### View logs
+
+```bash
+docker compose logs                  # all services
+docker compose logs service-a        # single service
+docker compose logs nginx            # Nginx access/error logs
+```
+
+### Trace a request
+
+```bash
+curl -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: demo-container-001"
+docker compose logs | grep demo-container-001
+```
+
+### Stop and restart a service
+
+```bash
+docker compose stop service-b        # stop one service
+docker compose start service-b       # restart it
+```
+
+### Shut everything down
+
+```bash
+docker compose down
+```
+
+### Key differences from VM deployment
+
+| VM version | Docker Compose version |
+|------------|----------------------|
+| systemd starts services | Compose starts containers |
+| `/etc/hosts` service names | Compose DNS service names |
+| `journalctl` logs | `docker compose logs` |
+| UFW + loopback bind | Docker networks + no published ports |
+| VM restart policy | `restart: unless-stopped` |
+| Services bind to `127.0.0.1` | Services bind to `0.0.0.0` (isolated by Docker networking) |
+
+See [docs/CONTAINER_VALIDATION.md](docs/CONTAINER_VALIDATION.md) for full validation evidence.
+
+## Uninstall (VM deployment)
 
 ```bash
 sudo bash scripts/uninstall.sh
