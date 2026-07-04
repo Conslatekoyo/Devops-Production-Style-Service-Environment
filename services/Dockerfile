@@ -1,12 +1,9 @@
-FROM node:20-alpine
-
+FROM node:20.18.1-alpine
 WORKDIR /app
-
 COPY package.json package-lock.json ./
-RUN npm ci --production
-
+RUN npm ci --omit=dev
 COPY index.js .
-
-EXPOSE ${PORT:-3000}
-
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+EXPOSE 3001
 CMD ["node", "index.js"]
