@@ -50,7 +50,7 @@ jobs:
         run: |
           docker build \
             -t ${{ matrix.service }}:${{ github.sha }} \
-            -f ${{ matrix.path }}/Dockerfile \
+            -f ./services/Dockerfile \
             ${{ matrix.path }}
 
   verify-compose:
