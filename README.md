@@ -5,63 +5,63 @@ Three internal HTTP services orchestrated with Nginx, systemd, and Linux network
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         Ubuntu VM                                   │
-│                                                                     │
-│  ┌──────────────┐    ┌─────────────────────────────────────────┐    │
-│  │   UFW        │    │        Internal Network (127.0.0.1)     │    │
-│  │   Firewall   │    │                                         │    │
-│  │              │    │  ┌───────────┐      ┌───────────┐       │    │
-│  │  Allow:      │    │  │ Service B │◄─────│ Service A │       │    │
-│  │   22 (SSH)   │    │  │  :3002    │      │  :3001    │◄──┐   │    │
-│  │   80 (HTTP)  │    │  │ /greet    │      │ /greet-   │   │   │    │
-│  │              │    │  │ /health   │      │  service-b│   │   │    │
-│  │  Block:      │    │  │ /metrics  │      │ /greeting-│   │   │    │
-│  │   3001       │    │  └─────┬─────┘      │  rcvd     │   │   │    │
-│  │   3002       │    │        │             │ /health   │   │   │    │
-│  │   3003       │    │        │             │ /metrics  │   │   │    │
-│  │              │    │        ▼             └─────▲─────┘   │   │    │
-│  │              │    │  ┌───────────┐            │          │   │    │
-│  │              │    │  │ Service C │────────────┘          │   │    │
-│  │              │    │  │  :3003    │  callback POST        │   │    │
-│  │              │    │  │ /greet-c  │  /greeting-rcvd       │   │    │
-│  │              │    │  │ /health   │                       │   │    │
-│  │              │    │  │ /metrics  │                       │   │    │
-│  │              │    │  └───────────┘                       │   │    │
-│  │              │    └─────────────────────────────────────────┘    │
-│  └──────┬───────┘                                           │      │
-│         │                                                   │      │
-│  ┌──────▼───────────────────────────────────────────────────┘─┐    │
-│  │                    Nginx (:80)                              │    │
-│  │  /service-a/*  →  proxy_pass service-a.internal:3001       │    │
-│  │  /*            →  404                                       │    │
-│  │  Rate limit: 30 req/s per IP, burst 10                     │    │
-│  └─────────▲──────────────────────────────────────────────────┘    │
-│            │                                                        │
-└────────────┼────────────────────────────────────────────────────────┘
-             │
-     ┌───────┴───────┐
-     │    Client      │
-     │  (Port 80)     │
-     └───────────────┘
++-----------------------------------------------------------------------+
+|                         Ubuntu VM                                     |
+|                                                                       |
+|  +--------------+    +-----------------------------------------+    |
+|  |   UFW        |    |        Internal Network (127.0.0.1)     |    |
+|  |   Firewall   |    |                                         |    |
+|  |              |    |  +-----------+      +-----------+       |    |
+|  |  Allow:      |    |  | Service B |<-----| Service A |       |    |
+|  |   22 (SSH)   |    |  |  :3002    |      |  :3001    |<--+   |    |
+|  |   80 (HTTP)  |    |  | /greet    |      | /greet-   |   |   |    |
+|  |              |    |  | /health   |      |  service-b|   |   |    |
+|  |  Block:      |    |  | /metrics  |      | /greeting-|   |   |    |
+|  |   3001       |    |  +-----+-----+      |  rcvd     |   |   |    |
+|  |   3002       |    |        |             | /health   |   |   |    |
+|  |   3003       |    |        |             | /metrics  |   |   |    |
+|  |              |    |        v             +-----^-----+   |   |    |
+|  |              |    |  +-----------+            |          |   |    |
+|  |              |    |  | Service C |------------+          |   |    |
+|  |              |    |  |  :3003    |  callback POST        |   |    |
+|  |              |    |  | /greet-c  |  /greeting-rcvd       |   |    |
+|  |              |    |  | /health   |                       |   |    |
+|  |              |    |  | /metrics  |                       |   |    |
+|  |              |    |  +-----------+                       |   |    |
+|  |              |    +-----------------------------------------+    |
+|  +------+-------+                                           |      |
+|         |                                                   |      |
+|  +------v-----------------------------------------------------+    |
+|  |                    Nginx (:80)                              |    |
+|  |  /service-a/*  ->  proxy_pass service-a.internal:3001       |    |
+|  |  /*            ->  404                                       |    |
+|  |  Rate limit: 30 req/s per IP, burst 10                     |    |
+|  +---------^----------------------------------------------------+    |
+|            |                                                        |
++------------+----------------------------------------------------------+
+             |
+     +-------+-------+
+     |    Client      |
+     |  (Port 80)     |
+     +----------------+
 ```
 
 **Services:**
-- **Service A** (:3001) — accepts client requests, forwards to B, receives callbacks from C
-- **Service B** (:3002) — receives from A, forwards to C
-- **Service C** (:3003) — receives from B, sends callback to A
-- **Nginx** (:80) — reverse proxy, only exposes Service A at `/service-a/*`
+- **Service A** (:3001) -- accepts client requests, forwards to B, receives callbacks from C
+- **Service B** (:3002) -- receives from A, forwards to C
+- **Service C** (:3003) -- receives from B, sends callback to A
+- **Nginx** (:80) -- reverse proxy, only exposes Service A at `/service-a/*`
 
 Only ports 80 and 22 are externally accessible.
 
 ## Request Flow
 
-1. Client → `GET /service-a/greet-service-b` → Nginx (:80)
-2. Nginx strips prefix → `http://service-a.internal:3001/greet-service-b`
-3. Service A generates `X-Request-ID` (UUID) → calls Service B `/greet`
-4. Service B → calls Service C `/greet-c`
-5. Service C → POSTs callback to Service A `/greeting-rcvd`
-6. Service A resolves the pending request → responds to client
+1. Client -> `GET /service-a/greet-service-b` -> Nginx (:80)
+2. Nginx strips prefix -> `http://service-a.internal:3001/greet-service-b`
+3. Service A generates `X-Request-ID` (UUID) -> calls Service B `/greet`
+4. Service B -> calls Service C `/greet-c`
+5. Service C -> POSTs callback to Service A `/greeting-rcvd`
+6. Service A resolves the pending request -> responds to client
 
 ## Service Discovery
 
@@ -93,21 +93,21 @@ echo "127.0.0.1 service-b.internal" | sudo tee -a /etc/hosts
 
 ## Network Security
 
-Services B and C are internal infrastructure — they should only receive requests from other services on the same machine. Exposing them externally would bypass the Nginx reverse proxy and any access controls at that layer.
+Services B and C are internal infrastructure -- they should only receive requests from other services on the same machine. Exposing them externally would bypass the Nginx reverse proxy and any access controls at that layer.
 
 **Two layers enforce the protection:**
 
-1. **UFW Firewall** — only ports 22 (SSH) and 80 (HTTP) are open to external traffic. Ports 3001, 3002, and 3003 are blocked from outside the VM.
-2. **Nginx routing** — only `/service-a/*` paths are proxied. No routes exist for Service B or C.
+1. **UFW Firewall** -- only ports 22 (SSH) and 80 (HTTP) are open to external traffic. Ports 3001, 3002, and 3003 are blocked from outside the VM.
+2. **Nginx routing** -- only `/service-a/*` paths are proxied. No routes exist for Service B or C.
 
 **Verifying the protection:**
 
 ```bash
-# From outside the VM — these should fail/timeout:
+# From outside the VM -- these should fail/timeout:
 curl http://<VM_PUBLIC_IP>:3002/health
 curl http://<VM_PUBLIC_IP>:3003/health
 
-# From outside the VM — this should work:
+# From outside the VM -- this should work:
 curl http://<VM_PUBLIC_IP>/service-a/health
 
 # Check firewall rules:
@@ -133,12 +133,12 @@ sudo bash scripts/deploy.sh
 
 This installs Node.js/Nginx, copies files to `/opt/production-services`, configures `/etc/hosts`, sets up systemd units, enables UFW, and starts everything.
 
-For manual steps, see `scripts/deploy.sh` — it's readable and commented.
+For manual steps, see `scripts/deploy.sh` -- it's readable and commented.
 
 ## Operation
 
 ```bash
-# Start (B and C first — A depends on them)
+# Start (B and C first -- A depends on them)
 sudo systemctl start service-b service-c && sleep 2 && sudo systemctl start service-a
 
 # Stop (A first)
@@ -206,17 +206,17 @@ sudo journalctl -u service-a -u service-b -u service-c --no-pager | grep "$REQID
 grep "$REQID" /var/log/nginx/service-proxy-access.log
 ```
 
-The `request_id` appears in: Nginx access log → Service A (`request_received`, `request_forwarded`, `callback_received`) → Service B (`request_received`, `request_forwarded`) → Service C (`request_received`, `callback_sent`).
+The `request_id` appears in: Nginx access log -> Service A (`request_received`, `request_forwarded`, `callback_received`) -> Service B (`request_received`, `request_forwarded`) -> Service C (`request_received`, `callback_sent`).
 
 ## Systemd
 
-- **Dependency order:** A starts `After` B and C, and `Wants` them as soft dependencies — systemd starts B and C first if not already running, but A is not forced down if one later stops. A detects an unreachable dependency in its own request handling and returns a 502, rather than relying on systemd to take it down.
+- **Dependency order:** A starts `After` B and C, and `Wants` them as soft dependencies -- systemd starts B and C first if not already running, but A is not forced down if one later stops. A detects an unreachable dependency in its own request handling and returns a 502, rather than relying on systemd to take it down.
 - **Auto-restart:** `Restart=on-failure`, `RestartSec=3`
 - **Boot persistence:** All services enabled via `systemctl enable`, start automatically on boot.
 
 ## Troubleshooting
 
-For any service issue, the general approach is: `systemctl status <svc>` → `journalctl -u <svc>` → restart in dependency order.
+For any service issue, the general approach is: `systemctl status <svc>` -> `journalctl -u <svc>` -> restart in dependency order.
 
 **Service startup failures:**
 ```bash
@@ -287,7 +287,167 @@ curl -H "X-Request-ID: test-123" http://service-b.internal:3002/greet
 curl -H "X-Request-ID: test-123" http://service-c.internal:3003/greet-c
 ```
 
-## Uninstall
+## Running with Docker Compose
+
+The same production flow can run in Docker Compose instead of on a VM with systemd.
+
+### Known issue: image builds may need host networking
+
+On some hosts, `docker compose build` (or `up --build`) fails with `npm error Exit handler never called!` after about two minutes, caused by DNS resolution failures (`EAI_AGAIN`) inside the build container. This happens when Docker's bridge networks don't have working NAT rules -- commonly because `/etc/docker/daemon.json` has `"iptables": false` set (e.g. as a workaround for a Multipass/Docker iptables conflict on the same host).
+
+**If you hit this**, check:
+```bash
+cat /etc/docker/daemon.json
+```
+If `"iptables": false` is set, change it to `true` and restart Docker:
+```bash
+sudo sed -i 's/"iptables": false/"iptables": true/' /etc/docker/daemon.json
+sudo systemctl restart docker
+```
+
+If builds still fail after that (container DNS can still be broken even with NAT rules present, e.g. due to conntrack issues), build each image directly with host networking, which bypasses the bridge entirely for the build step only:
+```bash
+docker build --network=host --no-cache -t devops-production-style-service-environment-service-a ./services/service-a -f services/Dockerfile
+docker build --network=host --no-cache -t devops-production-style-service-environment-service-b ./services/service-b -f services/Dockerfile
+docker build --network=host --no-cache -t devops-production-style-service-environment-service-c ./services/service-c -f services/Dockerfile
+```
+Then start normally -- runtime networking is unaffected, only the build step needed this:
+```bash
+docker compose up -d
+```
+
+### Start the system
+
+```bash
+docker compose up --build -d
+```
+
+**Expected output** (after a successful build, or after building manually per above):
+```
+Container nginx       Started
+Container service-a   Started
+Container service-b   Started
+Container service-c   Started
+```
+
+Confirm all four are running:
+```bash
+docker compose ps
+```
+Expected: all four containers (`nginx`, `service-a`, `service-b`, `service-c`) show `Up`.
+
+### Test the public route
+
+```bash
+curl -i http://localhost:8080/service-a/health
+```
+Expected:
+```
+HTTP/1.1 200 OK
+{"service":"service-a","status":"healthy","port":"3001","message":"Hello service-a listening on 3001"}
+```
+
+Full request flow (A -> B -> C -> A callback):
+```bash
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "Content-Type: application/json"
+```
+Expected:
+```
+HTTP/1.1 200 OK
+{"request_id":"<generated-uuid>","status":"success","message":"Request completed successfully"}
+```
+
+### Prove B and C are internal
+
+From the host, these should fail immediately (connection refused):
+```bash
+curl -i --connect-timeout 3 http://localhost:3002/health
+curl -i --connect-timeout 3 http://localhost:3003/health
+```
+Expected:
+```
+curl: (7) Failed to connect to localhost port 3002 after 0 ms: Couldn't connect to server
+curl: (7) Failed to connect to localhost port 3003 after 0 ms: Couldn't connect to server
+```
+
+From inside the Docker network, they work. Note: the `node:20-alpine` images don't include `curl`, so use `wget`:
+```bash
+docker compose exec service-a wget -qO- http://service-b:3002/health
+docker compose exec service-b wget -qO- http://service-c:3003/health
+```
+Expected:
+```
+{"service":"service-b","status":"healthy","port":"3002", ...}
+{"service":"service-c","status":"healthy","port":"3003", ...}
+```
+
+### View logs
+
+```bash
+docker compose logs                  # all services
+docker compose logs service-a        # single service
+docker compose logs nginx            # Nginx access/error logs
+```
+
+### Trace a request
+
+```bash
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: demo-container-001" \
+  -H "Content-Type: application/json"
+docker compose logs | grep demo-container-001
+```
+Expected: the same `request_id` appears in Service A (`request_received`, `request_forwarded`, `callback_received`), Service B (`request_received`, `request_forwarded`), and Service C (`request_received`, `callback_sent`), in that order.
+
+### Stop a service and observe failure, then recover
+
+```bash
+docker compose stop service-b
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: fail-test-001" \
+  -H "Content-Type: application/json"
+```
+Expected:
+```
+HTTP/1.1 502 Bad Gateway
+{"request_id":"fail-test-001","status":"error","message":"Failed to reach service-b"}
+```
+Service A's logs record the failure:
+```bash
+docker compose logs service-a | grep fail-test-001
+```
+Expected: a `request_failed` log entry with `"status":502`.
+
+Recover:
+```bash
+docker compose start service-b
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: recovery-test-001" \
+  -H "Content-Type: application/json"
+```
+Expected: `200 OK` with a success message -- the system recovers automatically once Service B is back up.
+
+### Shut everything down
+
+```bash
+docker compose down
+```
+
+### Key differences from VM deployment
+
+| VM version | Docker Compose version |
+|------------|----------------------|
+| systemd starts services | Compose starts containers |
+| `/etc/hosts` service names | Compose DNS service names |
+| `journalctl` logs | `docker compose logs` |
+| UFW + loopback bind | Docker networks + no published ports |
+| VM restart policy | `restart: unless-stopped` |
+| Services bind to `127.0.0.1` | Services bind to `0.0.0.0` (isolated by Docker networking) |
+
+See [docs/CONTAINER_VALIDATION.md](docs/CONTAINER_VALIDATION.md) for full validation evidence.
+
+## Uninstall (VM deployment)
 
 ```bash
 sudo bash scripts/uninstall.sh
