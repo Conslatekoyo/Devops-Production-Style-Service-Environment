@@ -520,13 +520,6 @@ curl --connect-timeout 3 http://localhost:3003/health
 ```
 Expected: connection refused on both.
 
-**8. Test the full request flow**
-```bash
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
-  -H "X-Request-ID: peer-review-001" \
-  -H "Content-Type: application/json"
-```
-Expected: HTTP 200 with status success.
 
 **9. Trace the request across services**
 ```bash
@@ -537,17 +530,13 @@ Expected: same request ID visible in service-a, service-b, and service-c logs.
 **10. Stop and recover service-b**
 ```bash
 docker compose -f docker-compose.prod.yml stop service-b
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
-  -H "X-Request-ID: fail-test-001" \
-  -H "Content-Type: application/json"
+
 ```
 Expected: HTTP 502 with a clear error message.
 
 ```bash
 docker compose -f docker-compose.prod.yml start service-b
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
-  -H "X-Request-ID: recovery-001" \
-  -H "Content-Type: application/json"
+
 ```
 Expected: HTTP 200 — system recovers automatically.
 
