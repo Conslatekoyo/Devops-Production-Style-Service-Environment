@@ -465,12 +465,13 @@ Commit:
 Image tag:
 `sha-929e3fb`
 
-Images:
+### Docker Hub images (public)
 - `glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb`
 - `glorywachira/devops-production-style-service-environment-service-b:sha-929e3fb`
 - `glorywachira/devops-production-style-service-environment-service-c:sha-929e3fb`
 
 ### Docker Hub Repo:https://hub.docker.com/r/glorywachira/devops-production-style-service-environment-service-c
+
 ### Peer reviewer instructions
 
 If you are reviewing this repository, follow these steps exactly:
