@@ -454,3 +454,120 @@ sudo bash scripts/uninstall.sh
 ```
 
 Removes all services, Nginx config, `/etc/hosts` entries, firewall rules, and application files.
+
+## Container CI/CD Deployment
+
+### Latest deployed version
+
+Commit:
+`929e3fb5662cafeede55fc763584a59e55742fd5`
+
+Image tag:
+`sha-929e3fb`
+
+Images:
+- `glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb`
+- `glorywachira/devops-production-style-service-environment-service-b:sha-929e3fb`
+- `glorywachira/devops-production-style-service-environment-service-c:sha-929e3fb`
+
+### Peer reviewer instructions
+
+If you are reviewing this repository, follow these steps exactly:
+
+**1. Clone the repo and switch to main**
+```bash
+git clone https://github.com/Conslatekoyo/Devops-Production-Style-Service-Environment.git
+cd Devops-Production-Style-Service-Environment
+git checkout main
+```
+
+**2. Verify the CI pipeline**
+
+Go to the GitHub Actions tab and confirm the latest run on main is green:
+https://github.com/Conslatekoyo/Devops-Production-Style-Service-Environment/actions
+
+**3. Pull the published images from Docker Hub**
+```bash
+docker pull glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb
+docker pull glorywachira/devops-production-style-service-environment-service-b:sha-929e3fb
+docker pull glorywachira/devops-production-style-service-environment-service-c:sha-929e3fb
+```
+
+**4. Set up environment and deploy**
+```bash
+cp .env.example .env
+export DOCKERHUB_USERNAME=glorywachira
+export APP_NAME=Devops-Production-Style-Service-Environment
+./scripts/deploy.sh sha-929e3fb
+```
+
+**5. Verify the stack is running**
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+Expected: nginx, service-a, service-b, service-c all Up.
+
+**6. Test the public route through Nginx**
+```bash
+curl http://localhost:8080/service-a/health
+```
+Expected: HTTP 200 with a JSON health response from service-a.
+
+**7. Prove B and C are internal only**
+```bash
+curl --connect-timeout 3 http://localhost:3002/health
+curl --connect-timeout 3 http://localhost:3003/health
+```
+Expected: connection refused on both.
+
+**8. Test the full request flow**
+```bash
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: peer-review-001" \
+  -H "Content-Type: application/json"
+```
+Expected: HTTP 200 with status success.
+
+**9. Trace the request across services**
+```bash
+docker compose -f docker-compose.prod.yml logs | grep peer-review-001
+```
+Expected: same request ID visible in service-a, service-b, and service-c logs.
+
+**10. Stop and recover service-b**
+```bash
+docker compose -f docker-compose.prod.yml stop service-b
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: fail-test-001" \
+  -H "Content-Type: application/json"
+```
+Expected: HTTP 502 with a clear error message.
+
+```bash
+docker compose -f docker-compose.prod.yml start service-b
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: recovery-001" \
+  -H "Content-Type: application/json"
+```
+Expected: HTTP 200 — system recovers automatically.
+
+**11. Shut everything down**
+```bash
+docker compose -f docker-compose.prod.yml down
+```
+
+### Deploy (quick reference)
+
+```bash
+cp .env.example .env
+export DOCKERHUB_USERNAME=glorywachira
+export APP_NAME=Devops-Production-Style-Service-Environment
+./scripts/deploy.sh sha-929e3fb
+```
+
+### Verify
+
+```bash
+docker compose -f docker-compose.prod.yml ps
+curl http://localhost:8080/service-a/health
+```
