@@ -109,14 +109,17 @@ jobs:
       - name: Set short commit hash
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
+      - name: Set repo name lowercase
+        run: echo "REPO_NAME=$(echo ${{ github.event.repository.name }} | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.path }}
-          file: ${{ matrix.path }}/Dockerfile
+          file: ./services/Dockerfile
           push: true
           tags: |
-            ${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-${{ matrix.service }}:sha-${{ env.SHORT_SHA }}
+            ${{ vars.DOCKERHUB_USERNAME }}/${{ env.REPO_NAME }}-${{ matrix.service }}:sha-${{ env.SHORT_SHA }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
