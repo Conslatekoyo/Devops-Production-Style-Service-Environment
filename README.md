@@ -470,7 +470,13 @@ Image tag:
 - `glorywachira/devops-production-style-service-environment-service-b:sha-929e3fb`
 - `glorywachira/devops-production-style-service-environment-service-c:sha-929e3fb`
 
-### Docker Hub Repo:https://hub.docker.com/r/glorywachira/devops-production-style-service-environment-service-c
+### Docker Hub Repo:https:
+-//hub.docker.com/r/glorywachira/devops-production-style-service-environment-service-c
+
+### Prove the images are pullable and commit-pinned:
+```bash
+docker image inspect glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"
+```
 
 ### Peer reviewer instructions
 
