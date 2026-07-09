@@ -465,24 +465,35 @@ Commit:
 Image tag:
 `sha-929e3fb`
 
-### Docker Hub images (public)
+Images (public on Docker Hub):
 - `glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb`
 - `glorywachira/devops-production-style-service-environment-service-b:sha-929e3fb`
 - `glorywachira/devops-production-style-service-environment-service-c:sha-929e3fb`
 
-### Docker Hub Repo:
+Prove the images are pullable and commit-pinned:
 ```bash
-https://hub.docker.com/r/glorywachira/devops-production-style-service-environment-service-c
+docker pull glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb
+docker image inspect glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb   --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"
 ```
 
-### Prove the images are pullable and commit-pinned:
-```bash
-docker image inspect glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"
-```
+### What was fixed after instructor review
+
+1. **Real tests added** -- Node built-in test runner (`node --test`), no extra dependencies.
+   Each service has a `test.mjs` file with real HTTP assertions: `/health` returns 200,
+   downstream failure returns 502, unknown routes return 404.
+2. **Deploy path fixed** -- `APP_NAME` is now lowercased in `deploy.sh` and `.env.example`.
+   Docker Hub requires lowercase image names; the deploy script now handles this correctly.
+3. **Dev Compose mirrors prod** -- `docker-compose.yml` now has the same frontend/backend
+   network segmentation as `docker-compose.prod.yml`. CI verifies the same topology you deploy.
+4. **Healthchecks added** -- All services have `healthcheck` blocks using a Node one-liner
+   (no curl needed in alpine). `depends_on` uses `condition: service_healthy` so startup
+   order is readiness-gated, not just start-order.
+5. **EXPOSE fixed** -- Dockerfile uses `ARG PORT=3001` + `EXPOSE ${PORT}`, and the CI
+   workflow passes `--build-arg PORT=<port>` per service so each image documents its real port.
+6. **Prod variables fail loudly** -- `IMAGE_TAG` uses `${IMAGE_TAG:?IMAGE_TAG is required}`
+   in `docker-compose.prod.yml` so a missing tag causes an immediate clear error.
 
 ### Peer reviewer instructions
-
-If you are reviewing this repository, follow these steps exactly:
 
 **1. Clone the repo and switch to main**
 ```bash
@@ -493,7 +504,7 @@ git checkout main
 
 **2. Verify the CI pipeline**
 
-Go to the GitHub Actions tab and confirm the latest run on main is green:
+Go to Actions and confirm the latest run on main is green:
 https://github.com/Conslatekoyo/Devops-Production-Style-Service-Environment/actions
 
 **3. Pull the published images from Docker Hub**
@@ -507,7 +518,7 @@ docker pull glorywachira/devops-production-style-service-environment-service-c:s
 ```bash
 cp .env.example .env
 export DOCKERHUB_USERNAME=glorywachira
-export APP_NAME=Devops-Production-Style-Service-Environment
+export APP_NAME=devops-production-style-service-environment
 ./scripts/deploy.sh sha-929e3fb
 ```
 
@@ -515,11 +526,11 @@ export APP_NAME=Devops-Production-Style-Service-Environment
 ```bash
 docker compose -f docker-compose.prod.yml ps
 ```
-Expected: nginx, service-a, service-b, service-c all Up.
+Expected: nginx, service-a, service-b, service-c all Up and healthy.
 
 **6. Test the public route through Nginx**
 ```bash
-curl http://localhost:8080/service-a/health
+curl -i http://localhost:8080/service-a/health
 ```
 Expected: HTTP 200 with a JSON health response from service-a.
 
@@ -530,6 +541,11 @@ curl --connect-timeout 3 http://localhost:3003/health
 ```
 Expected: connection refused on both.
 
+**8. Test the full request flow**
+```bash
+curl -i -X POST http://localhost:8080/service-a/greet-service-b   -H "X-Request-ID: peer-review-001"   -H "Content-Type: application/json"
+```
+Expected: HTTP 200 with status success. Note: this endpoint is POST only -- GET returns 404.
 
 **9. Trace the request across services**
 ```bash
@@ -537,20 +553,21 @@ docker compose -f docker-compose.prod.yml logs | grep peer-review-001
 ```
 Expected: same request ID visible in service-a, service-b, and service-c logs.
 
-**10. Stop and recover service-b**
+**10. Stop service-b and observe failure**
 ```bash
 docker compose -f docker-compose.prod.yml stop service-b
-
+curl -i -X POST http://localhost:8080/service-a/greet-service-b   -H "X-Request-ID: fail-test-001"   -H "Content-Type: application/json"
 ```
 Expected: HTTP 502 with a clear error message.
 
+**11. Recover service-b**
 ```bash
 docker compose -f docker-compose.prod.yml start service-b
-
+curl -i -X POST http://localhost:8080/service-a/greet-service-b   -H "X-Request-ID: recovery-001"   -H "Content-Type: application/json"
 ```
-Expected: HTTP 200 — system recovers automatically.
+Expected: HTTP 200 -- system recovers automatically.
 
-**11. Shut everything down**
+**12. Shut everything down**
 ```bash
 docker compose -f docker-compose.prod.yml down
 ```
@@ -560,7 +577,7 @@ docker compose -f docker-compose.prod.yml down
 ```bash
 cp .env.example .env
 export DOCKERHUB_USERNAME=glorywachira
-export APP_NAME=Devops-Production-Style-Service-Environment
+export APP_NAME=devops-production-style-service-environment
 ./scripts/deploy.sh sha-929e3fb
 ```
 
