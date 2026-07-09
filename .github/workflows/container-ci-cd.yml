@@ -87,7 +87,7 @@ jobs:
 
       - name: Stop Compose stack
         if: always()
-        run: docker compose down -av  
+        run: docker compose down -v  
 
   publish:
     name: Publish Docker images
