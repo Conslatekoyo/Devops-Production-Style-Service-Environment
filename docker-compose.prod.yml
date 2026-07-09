@@ -1,31 +1,48 @@
 services:
   service-a:
-    image: ${DOCKERHUB_USERNAME}/${APP_NAME}-service-a:${IMAGE_TAG}
+    image: ${DOCKERHUB_USERNAME}/${APP_NAME}-service-a:${IMAGE_TAG:?IMAGE_TAG is required}
     environment:
       BIND_HOST: 0.0.0.0
       SERVICE_B_URL: http://service-b:3002
       SERVICE_C_URL: http://service-c:3003
       PORT: 3001
     depends_on:
-      - service-b
-      - service-c
+      service-b:
+        condition: service_healthy
+      service-c:
+        condition: service_healthy
     networks:
       - frontend
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   service-b:
-    image: ${DOCKERHUB_USERNAME}/${APP_NAME}-service-b:${IMAGE_TAG}
+    image: ${DOCKERHUB_USERNAME}/${APP_NAME}-service-b:${IMAGE_TAG:?IMAGE_TAG is required}
     environment:
       BIND_HOST: 0.0.0.0
       SERVICE_C_URL: http://service-c:3003
       PORT: 3002
+    depends_on:
+      service-c:
+        condition: service_healthy
     networks:
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3002/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   service-c:
-    image: ${DOCKERHUB_USERNAME}/${APP_NAME}-service-c:${IMAGE_TAG}
+    image: ${DOCKERHUB_USERNAME}/${APP_NAME}-service-c:${IMAGE_TAG:?IMAGE_TAG is required}
     environment:
       BIND_HOST: 0.0.0.0
       SERVICE_A_URL: http://service-a:3001
@@ -33,6 +50,12 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3003/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   nginx:
     image: nginx:1.27-alpine
@@ -41,7 +64,8 @@ services:
     volumes:
       - ./nginx/docker-service-proxy.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      - service-a
+      service-a:
+        condition: service_healthy
     networks:
       - frontend
     restart: unless-stopped

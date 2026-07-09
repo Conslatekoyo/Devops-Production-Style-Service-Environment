@@ -19,10 +19,13 @@ jobs:
         include:
           - service: service-a
             path: ./services/service-a
+            port: 3001
           - service: service-b
             path: ./services/service-b
+            port: 3002
           - service: service-c
             path: ./services/service-c
+            port: 3003
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -51,6 +54,7 @@ jobs:
           docker build \
             -t ${{ matrix.service }}:${{ github.sha }} \
             -f ./services/Dockerfile \
+            --build-arg PORT=${{ matrix.port }} \
             ${{ matrix.path }}
 
   verify-compose:
@@ -61,26 +65,29 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate Compose file
+      - name: Validate Dev Compose file
         run: docker compose config
+
+      - name: Validate Prod Compose file
+        run: |
+          DOCKERHUB_USERNAME=dummy APP_NAME=dummy IMAGE_TAG=dummy docker compose -f docker-compose.prod.yml config
 
       - name: Build Compose stack
         run: docker compose build --pull
 
       - name: Start Compose stack
-        run: docker compose up -d
+        run: docker compose up -d --wait
 
       - name: Show running services
         run: docker compose ps
 
       - name: Check gateway health
         run: |
-          sleep 10
           curl --fail http://localhost:8080/service-a/health
 
       - name: Stop Compose stack
         if: always()
-        run: docker compose down -v
+        run: docker compose down -av  
 
   publish:
     name: Publish Docker images
@@ -92,10 +99,13 @@ jobs:
         include:
           - service: service-a
             path: ./services/service-a
+            port: 3001
           - service: service-b
             path: ./services/service-b
+            port: 3002
           - service: service-c
             path: ./services/service-c
+            port: 3003
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -118,6 +128,8 @@ jobs:
           context: ${{ matrix.path }}
           file: ./services/Dockerfile
           push: true
+          build-args: |
+            PORT=${{ matrix.port }}
           tags: |
             ${{ vars.DOCKERHUB_USERNAME }}/${{ env.REPO_NAME }}-${{ matrix.service }}:sha-${{ env.SHORT_SHA }}
           labels: |
