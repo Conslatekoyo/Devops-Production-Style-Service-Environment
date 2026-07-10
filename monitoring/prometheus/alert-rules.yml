@@ -1,0 +1,54 @@
+groups:
+  - name: microservices-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"service-a|service-b|service-c"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "{{ $labels.job }} is down"
+          description: "Prometheus has been unable to scrape {{ $labels.job }} for more than 30 seconds."
+
+  - name: microservices-errors
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum by (service) (
+              rate(http_errors_total[2m])
+            )
+            /
+            clamp_min(
+              sum by (service) (
+                rate(http_requests_total[2m])
+              ),
+              0.001
+            )
+          ) > 0.05
+        for: 1m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High error rate on {{ $labels.service }}"
+          description: "{{ $labels.service }} has an HTTP error rate above 5% for more than one minute."
+
+  - name: microservices-latency
+    rules:
+      - alert: HighP95Latency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (service, le) (
+              rate(http_request_duration_seconds_bucket[2m])
+            )
+          ) > 1
+        for: 1m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "High p95 latency on {{ $labels.service }}"
+          description: "The p95 latency for {{ $labels.service }} has exceeded one second."

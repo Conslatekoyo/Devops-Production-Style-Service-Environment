@@ -3,7 +3,7 @@ require('./tracer');
 
 const express = require('express');
 const crypto = require('crypto');
-
+const { trace } = require('@opentelemetry/api');
 const app = express();
 const PORT = process.env.PORT || 3002;
 const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
@@ -45,12 +45,62 @@ function clientIp(req) {
   return req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || req.ip || req.socket.remoteAddress;
 }
 
-function log(entry) {
-  const record = { timestamp: new Date().toISOString(), service: SERVICE_NAME, ...entry };
-  process.stdout.write(JSON.stringify(record) + '\n');
+function currentTraceId() {
+  const span = trace.getActiveSpan();
+  const context = span?.spanContext();
+
+  if (!context || !context.traceId) {
+    return null;
+  }
+
+  return context.traceId;
 }
 
+function log(entry) {
+  const record = {
+    timestamp: new Date().toISOString(),
+    service: SERVICE_NAME,
+    level: entry.level || 'info',
+    trace_id: entry.trace_id || currentTraceId(),
+    ...entry
+  };
+
+  process.stdout.write(JSON.stringify(record) + '\n');
+}
 app.use(express.json());
+app.use((req, res, next) => {
+  const startedAt = process.hrtime.bigint();
+  const requestId =
+    req.headers['x-request-id'] ||
+    crypto.randomUUID();
+
+  req.requestId = requestId;
+  res.setHeader('X-Request-ID', requestId);
+
+  res.on('finish', () => {
+    const durationMs =
+      Number(process.hrtime.bigint() - startedAt) / 1_000_000;
+
+    const level =
+      res.statusCode >= 500
+        ? 'error'
+        : res.statusCode >= 400
+          ? 'warn'
+          : 'info';
+
+    log({
+      level,
+      event: 'request_completed',
+      request_id: requestId,
+      method: req.method,
+      path: req.originalUrl,
+      status: res.statusCode,
+      duration_ms: Number(durationMs.toFixed(2))
+    });
+  });
+
+  next();
+});
 
 // Prometheus metrics middleware
 app.use((req, res, next) => {

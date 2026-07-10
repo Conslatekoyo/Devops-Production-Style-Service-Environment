@@ -13,13 +13,17 @@ const BASE = 'http://127.0.0.1:13001';
 describe('service-a', () => {
   after(() => app.close?.() ?? process.exit(0));
 
-  it('GET /health returns 200 with correct body', async () => {
-    const res = await fetch(`${BASE}/health`);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.service, 'service-a');
-    assert.equal(body.status, 'healthy');
-    assert.ok(body.port);
+  it('GET /health returns degraded when service-b is unreachable', async () => {
+  const res = await fetch(`${BASE}/health`);
+
+  assert.equal(res.status, 207);
+
+  const body = await res.json();
+
+  assert.equal(body.service, 'service-a');
+  assert.equal(body.status, 'degraded');
+  assert.equal(body.dependencies['service-b'], 'unreachable');
+  assert.ok(body.port);
   });
 
   it('GET /metrics returns Prometheus exposition format', async () => {
