@@ -186,7 +186,7 @@ sudo journalctl -u service-a -u service-b -u service-c  # all services combined
 
 Nginx logs: `/var/log/nginx/service-proxy-access.log` (JSON format), `/var/log/nginx/service-proxy-error.log`
 
-Each service also exposes `GET /metrics` with counters (uptime, request counts, status codes, response times).
+Each service also exposes `GET /metrics` in Prometheus exposition format (request counts, error counts, request duration histogram, service up/down) -- see [Observability stack](#observability-stack-prometheus--grafana) below.
 
 ## Request Tracing
 
@@ -328,13 +328,15 @@ Container nginx       Started
 Container service-a   Started
 Container service-b   Started
 Container service-c   Started
+Container prometheus  Started
+Container grafana     Started
 ```
 
-Confirm all four are running:
+Confirm all six are running:
 ```bash
 docker compose ps
 ```
-Expected: all four containers (`nginx`, `service-a`, `service-b`, `service-c`) show `Up`.
+Expected: all six containers (`nginx`, `service-a`, `service-b`, `service-c`, `prometheus`, `grafana`) show `Up`.
 
 ### Test the public route
 
@@ -390,6 +392,56 @@ docker compose logs service-a        # single service
 docker compose logs nginx            # Nginx access/error logs
 ```
 
+### Observability stack (Prometheus + Grafana)
+
+Every service exposes Prometheus-compatible metrics at `GET /metrics` (`http_requests_total`,
+`http_errors_total`, `http_request_duration_seconds`, `service_up`), scraped every 5s using
+Docker Compose service names (see [prometheus.yml](prometheus.yml) -- no hardcoded `localhost`).
+
+**Access:**
+
+| Tool | URL | Notes |
+|------|-----|-------|
+| Prometheus | http://localhost:9090 | Query metrics, check scrape target health |
+| Grafana | http://localhost:3000 | Login `admin` / `admin`, or browse anonymously (Viewer) |
+
+**View raw metrics from a service:**
+
+```bash
+curl http://localhost:8080/service-a/metrics
+docker compose exec service-a wget -qO- http://service-b:3002/metrics
+```
+
+**Confirm Prometheus is scraping all services:**
+
+```bash
+open http://localhost:9090/targets
+```
+
+Expected: `prometheus`, `service-a`, `service-b`, and `service-c` targets all show `UP`.
+
+**View the central operating dashboard:**
+
+```bash
+open http://localhost:3000/d/operating-view
+```
+
+The "Central Operating View" dashboard is auto-provisioned from
+[grafana/dashboards/operating-view.json](grafana/dashboards/operating-view.json) (datasource
+config in [grafana/provisioning/](grafana/provisioning/)) and shows:
+
+- Service up/down status (`up{job=~"service-a|service-b|service-c"}`)
+- Request rate per service (`rate(http_requests_total[1m])`)
+- Error rate % per service (`http_errors_total` / `http_requests_total`)
+- p95 latency per service (`histogram_quantile(0.95, ...http_request_duration_seconds_bucket...)`)
+- Alert state (populated once alert rules are added to Prometheus)
+
+Send some traffic and refresh the dashboard to see the panels move:
+
+```bash
+for i in $(seq 1 20); do curl -s -o /dev/null -X POST http://localhost:8080/service-a/greet-service-b; done
+```
+
 ### Trace a request
 
 ```bash
@@ -427,6 +479,98 @@ curl -i -X POST http://localhost:8080/service-a/greet-service-b \
   -H "Content-Type: application/json"
 ```
 Expected: `200 OK` with a success message -- the system recovers automatically once Service B is back up.
+
+## Distributed Tracing (Jaeger)
+
+All three services are instrumented with OpenTelemetry and export traces to Jaeger automatically. Every inbound and outbound HTTP call is traced, with spans propagated across the full A -> B -> C -> A(callback) chain.
+
+**Access Jaeger UI:****Confirm all three services appear in Jaeger:**
+```bash
+curl -s http://localhost:16686/api/services | python3 -m json.tool
+```
+Expected: `service-a`, `service-b`, and `service-c` all listed.
+
+**View traces for a specific request:**
+```bash
+curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+  -H "X-Request-ID: trace-demo-001" \
+  -H "Content-Type: application/json"
+```
+Then open http://localhost:16686, select `service-a` from the Service dropdown, and search for traces. You will see the full span tree: service-a -> service-b -> service-c -> service-a(callback).
+
+---
+
+## Advanced Health Endpoints
+
+Every service exposes an enhanced `/health` endpoint that actively checks its downstream dependencies and returns a `degraded` status if they are unreachable -- rather than always returning `healthy` regardless of system state.
+
+| Service | Checks | Degraded when |
+|---------|--------|---------------|
+| service-a | service-b reachability | service-b returns non-200 or times out (2s) |
+| service-b | service-c reachability | service-c returns non-200 or times out (2s) |
+| service-c | none (leaf service) | never degraded |
+
+**Test normal healthy state:**
+```bash
+curl -s http://localhost:8080/service-a/health | python3 -m json.tool
+```
+Expected:
+```json
+{
+    "service": "service-a",
+    "status": "healthy",
+    "port": "3001",
+    "dependencies": {
+        "service-b": "ok"
+    }
+}
+```
+
+**Test degraded state:**
+```bash
+docker compose stop service-b
+curl -s http://localhost:8080/service-a/health | python3 -m json.tool
+```
+Expected: HTTP 207 with `"status": "degraded"` and `"service-b": "unreachable"`.
+
+**Recover:**
+```bash
+docker compose start service-b
+```
+
+---
+
+## Failure Demo Endpoints
+
+Each service exposes two lab-only controlled failure endpoints for observability testing and load test scenarios. Responses and logs include `note: lab-only`.
+
+### `/slow` -- simulated latency
+
+```bash
+curl -i "http://localhost:8080/service-a/slow?ms=500"
+```
+Expected: HTTP 200 after the delay with `delay_ms` in body.
+
+### `/fail` -- simulated 500 error
+
+```bash
+curl -i http://localhost:8080/service-a/fail
+```
+Expected: HTTP 500 with `"status": "error"` and `"message": "Simulated failure"`.
+
+Both endpoints available on all three services:
+```bash
+docker compose exec service-a wget -qO- "http://service-b:3002/slow?ms=200"
+docker compose exec service-a wget -qO- http://service-c:3003/fail
+```
+
+Generate observable traffic for Prometheus, Grafana, and Jaeger:
+```bash
+for i in $(seq 1 5); do curl -s -o /dev/null "http://localhost:8080/service-a/slow?ms=1000"; done
+for i in $(seq 1 10); do curl -s -o /dev/null http://localhost:8080/service-a/fail; done
+open http://localhost:16686
+```
+
 
 ### Shut everything down
 

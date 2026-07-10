@@ -19,11 +19,13 @@ describe('service-b', () => {
     assert.equal(body.status, 'healthy');
   });
 
-  it('GET /metrics returns 200', async () => {
+  it('GET /metrics returns Prometheus exposition format', async () => {
     const res = await fetch(`${BASE}/metrics`);
     assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.service, 'service-b');
+    assert.match(res.headers.get('content-type'), /text\/plain/);
+    const body = await res.text();
+    assert.match(body, /# TYPE http_requests_total counter/);
+    assert.match(body, /service_up\{service="service-b"\} 1/);
   });
 
   it('POST /greet returns 502 when service-c is unreachable', async () => {
