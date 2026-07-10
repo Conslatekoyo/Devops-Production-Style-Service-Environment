@@ -1,4 +1,8 @@
+'use strict';
+require('./tracer');
+
 const express = require('express');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3003;
@@ -41,14 +45,24 @@ function log(entry) {
 
 app.use(express.json());
 
+// Service C has no downstream dependencies - always healthy
 app.get('/health', (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
-  log({ event: 'health_check', request_id: requestId, method: 'GET', path: '/health', status: 200, client_ip: clientIp(req) });
+  log({
+    event: 'health_check',
+    request_id: requestId,
+    method: 'GET',
+    path: '/health',
+    status: 200,
+    client_ip: clientIp(req),
+    dependencies: {}
+  });
   res.json({
     service: SERVICE_NAME,
     status: 'healthy',
     port: PORT,
-    message: `Hello ${SERVICE_NAME} listening on ${PORT}`
+    message: `Hello ${SERVICE_NAME} listening on ${PORT}`,
+    dependencies: {}
   });
 });
 
@@ -66,50 +80,49 @@ app.get('/metrics', (req, res) => {
   });
 });
 
-// POST: receives the forwarded request from service-b and sends the callback
-// to service-a. Kept consistent with the POST-based chain end to end.
+// Controlled failure endpoints for observability testing
+app.get('/slow', async (req, res) => {
+  const delay = parseInt(req.query.ms) || 3000;
+  log({ event: 'slow_endpoint', delay_ms: delay, note: 'lab-only test endpoint' });
+  await new Promise(resolve => setTimeout(resolve, delay));
+  res.json({ service: SERVICE_NAME, status: 'ok', delay_ms: delay, note: 'lab-only' });
+});
+
+app.get('/fail', (req, res) => {
+  log({ event: 'fail_endpoint', status: 500, note: 'lab-only test endpoint' });
+  res.status(500).json({ service: SERVICE_NAME, status: 'error', message: 'Simulated failure', note: 'lab-only' });
+});
+
 app.post('/greet-c', async (req, res) => {
   const reqStart = Date.now();
-  const requestId = req.headers['x-request-id'] || 'none';
+  const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   metrics.requests_total++;
   log({ event: 'request_received', request_id: requestId, method: 'POST', path: '/greet-c', source: 'service-b', client_ip: clientIp(req) });
 
-  let callbackSent = false;
   try {
-    const callbackPayload = {
-      request_id: requestId,
-      source_service: SERVICE_NAME,
-      message: 'Greeting processed',
-      timestamp: new Date().toISOString()
-    };
-
-    const cbResponse = await fetch(`${SERVICE_A_URL}/greeting-rcvd`, {
+    const callbackResponse = await fetch(`${SERVICE_A_URL}/greeting-rcvd`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Request-ID': requestId },
-      body: JSON.stringify(callbackPayload)
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Request-ID': requestId
+      },
+      body: JSON.stringify({ request_id: requestId, source_service: SERVICE_NAME })
     });
 
-    callbackSent = cbResponse.ok;
-    metrics.callbacks_sent++;
     metrics.requests_success++;
+    metrics.callbacks_sent++;
     trackStatus(200);
     trackResponseTime(Date.now() - reqStart);
-    log({
-      event: 'callback_sent',
-      request_id: requestId,
-      target: 'service-a',
-      endpoint: '/greeting-rcvd',
-      status: cbResponse.status
-    });
+    log({ event: 'callback_sent', request_id: requestId, target: 'service-a', endpoint: '/greeting-rcvd', status: callbackResponse.status });
+    res.json({ request_id: requestId, status: 'processed', message: 'Callback sent to service-a' });
   } catch (err) {
-    metrics.callbacks_failed++;
     metrics.requests_failed++;
+    metrics.callbacks_failed++;
     trackStatus(502);
     trackResponseTime(Date.now() - reqStart);
-    log({ event: 'callback_failed', request_id: requestId, target: 'service-a', error: err.message, status: 502 });
+    log({ event: 'callback_failed', request_id: requestId, target: 'service-a', status: 502, error: err.message });
+    res.status(502).json({ request_id: requestId, status: 'error', message: 'Failed to reach service-a for callback' });
   }
-
-  res.json({ request_id: requestId, status: 'processed', callback_sent: callbackSent });
 });
 
 app.use((req, res) => {
@@ -121,6 +134,8 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found', path: req.path });
 });
 
-app.listen(PORT, BIND_HOST, () => {
+const server = app.listen(PORT, BIND_HOST, () => {
   log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT, bind_host: BIND_HOST });
 });
+
+module.exports = server;

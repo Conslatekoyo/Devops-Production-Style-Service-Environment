@@ -1,4 +1,8 @@
+'use strict';
+require('./tracer');
+
 const express = require('express');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -11,7 +15,6 @@ const metrics = {
   requests_total: 0,
   requests_success: 0,
   requests_failed: 0,
-  forwards_to_c: 0,
   status_codes: {},
   avg_response_time_ms: 0,
   _response_times: []
@@ -40,14 +43,41 @@ function log(entry) {
 
 app.use(express.json());
 
-app.get('/health', (req, res) => {
+// Advanced health check with dependency checking
+app.get('/health', async (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
-  log({ event: 'health_check', request_id: requestId, method: 'GET', path: '/health', status: 200, client_ip: clientIp(req) });
-  res.json({
+  let serviceCStatus = 'ok';
+
+  try {
+    const response = await fetch(`${SERVICE_C_URL}/health`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (!response.ok) serviceCStatus = 'degraded';
+  } catch {
+    serviceCStatus = 'unreachable';
+  }
+
+  const overallStatus = serviceCStatus === 'ok' ? 'healthy' : 'degraded';
+  const httpStatus = overallStatus === 'healthy' ? 200 : 207;
+
+  log({
+    event: 'health_check',
+    request_id: requestId,
+    method: 'GET',
+    path: '/health',
+    status: httpStatus,
+    client_ip: clientIp(req),
+    dependencies: { 'service-c': serviceCStatus }
+  });
+
+  res.status(httpStatus).json({
     service: SERVICE_NAME,
-    status: 'healthy',
+    status: overallStatus,
     port: PORT,
-    message: `Hello ${SERVICE_NAME} listening on ${PORT}`
+    message: `Hello ${SERVICE_NAME} listening on ${PORT}`,
+    dependencies: {
+      'service-c': serviceCStatus
+    }
   });
 });
 
@@ -58,17 +88,27 @@ app.get('/metrics', (req, res) => {
     requests_total: metrics.requests_total,
     requests_success: metrics.requests_success,
     requests_failed: metrics.requests_failed,
-    forwards_to_c: metrics.forwards_to_c,
     status_codes: metrics.status_codes,
     avg_response_time_ms: metrics.avg_response_time_ms
   });
 });
 
-// POST: mirrors service-a's /greet-service-b contract — this call forwards to
-// service-c and causes a downstream callback, so it is not a side-effect-free GET.
+// Controlled failure endpoints for observability testing
+app.get('/slow', async (req, res) => {
+  const delay = parseInt(req.query.ms) || 3000;
+  log({ event: 'slow_endpoint', delay_ms: delay, note: 'lab-only test endpoint' });
+  await new Promise(resolve => setTimeout(resolve, delay));
+  res.json({ service: SERVICE_NAME, status: 'ok', delay_ms: delay, note: 'lab-only' });
+});
+
+app.get('/fail', (req, res) => {
+  log({ event: 'fail_endpoint', status: 500, note: 'lab-only test endpoint' });
+  res.status(500).json({ service: SERVICE_NAME, status: 'error', message: 'Simulated failure', note: 'lab-only' });
+});
+
 app.post('/greet', async (req, res) => {
   const reqStart = Date.now();
-  const requestId = req.headers['x-request-id'] || 'none';
+  const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   metrics.requests_total++;
   log({ event: 'request_received', request_id: requestId, method: 'POST', path: '/greet', source: 'service-a', client_ip: clientIp(req) });
 
@@ -77,13 +117,12 @@ app.post('/greet', async (req, res) => {
       method: 'POST',
       headers: { 'X-Request-ID': requestId }
     });
-    await response.json();
+    const data = await response.json();
     metrics.requests_success++;
-    metrics.forwards_to_c++;
-    trackStatus(response.status);
+    trackStatus(200);
     trackResponseTime(Date.now() - reqStart);
     log({ event: 'request_forwarded', request_id: requestId, target: 'service-c', status: response.status });
-    res.json({ request_id: requestId, status: 'forwarded', target: 'service-c' });
+    res.json({ request_id: requestId, status: 'forwarded', message: data.message || 'Forwarded to service-c' });
   } catch (err) {
     metrics.requests_failed++;
     trackStatus(502);
@@ -102,6 +141,8 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found', path: req.path });
 });
 
-app.listen(PORT, BIND_HOST, () => {
+const server = app.listen(PORT, BIND_HOST, () => {
   log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT, bind_host: BIND_HOST });
 });
+
+module.exports = server;
