@@ -186,7 +186,7 @@ sudo journalctl -u service-a -u service-b -u service-c  # all services combined
 
 Nginx logs: `/var/log/nginx/service-proxy-access.log` (JSON format), `/var/log/nginx/service-proxy-error.log`
 
-Each service also exposes `GET /metrics` with counters (uptime, request counts, status codes, response times).
+Each service also exposes `GET /metrics` in Prometheus exposition format (request counts, error counts, request duration histogram, service up/down) -- see [Observability stack](#observability-stack-prometheus--grafana) below.
 
 ## Request Tracing
 
@@ -328,13 +328,15 @@ Container nginx       Started
 Container service-a   Started
 Container service-b   Started
 Container service-c   Started
+Container prometheus  Started
+Container grafana     Started
 ```
 
-Confirm all four are running:
+Confirm all six are running:
 ```bash
 docker compose ps
 ```
-Expected: all four containers (`nginx`, `service-a`, `service-b`, `service-c`) show `Up`.
+Expected: all six containers (`nginx`, `service-a`, `service-b`, `service-c`, `prometheus`, `grafana`) show `Up`.
 
 ### Test the public route
 
@@ -388,6 +390,56 @@ Expected:
 docker compose logs                  # all services
 docker compose logs service-a        # single service
 docker compose logs nginx            # Nginx access/error logs
+```
+
+### Observability stack (Prometheus + Grafana)
+
+Every service exposes Prometheus-compatible metrics at `GET /metrics` (`http_requests_total`,
+`http_errors_total`, `http_request_duration_seconds`, `service_up`), scraped every 5s using
+Docker Compose service names (see [prometheus.yml](prometheus.yml) -- no hardcoded `localhost`).
+
+**Access:**
+
+| Tool | URL | Notes |
+|------|-----|-------|
+| Prometheus | http://localhost:9090 | Query metrics, check scrape target health |
+| Grafana | http://localhost:3000 | Login `admin` / `admin`, or browse anonymously (Viewer) |
+
+**View raw metrics from a service:**
+
+```bash
+curl http://localhost:8080/service-a/metrics
+docker compose exec service-a wget -qO- http://service-b:3002/metrics
+```
+
+**Confirm Prometheus is scraping all services:**
+
+```bash
+open http://localhost:9090/targets
+```
+
+Expected: `prometheus`, `service-a`, `service-b`, and `service-c` targets all show `UP`.
+
+**View the central operating dashboard:**
+
+```bash
+open http://localhost:3000/d/operating-view
+```
+
+The "Central Operating View" dashboard is auto-provisioned from
+[grafana/dashboards/operating-view.json](grafana/dashboards/operating-view.json) (datasource
+config in [grafana/provisioning/](grafana/provisioning/)) and shows:
+
+- Service up/down status (`up{job=~"service-a|service-b|service-c"}`)
+- Request rate per service (`rate(http_requests_total[1m])`)
+- Error rate % per service (`http_errors_total` / `http_requests_total`)
+- p95 latency per service (`histogram_quantile(0.95, ...http_request_duration_seconds_bucket...)`)
+- Alert state (populated once alert rules are added to Prometheus)
+
+Send some traffic and refresh the dashboard to see the panels move:
+
+```bash
+for i in $(seq 1 20); do curl -s -o /dev/null -X POST http://localhost:8080/service-a/greet-service-b; done
 ```
 
 ### Trace a request
