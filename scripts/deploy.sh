@@ -9,12 +9,8 @@ if [ -z "$IMAGE_TAG" ]; then
 fi
 
 export IMAGE_TAG
-export APP_NAME="${APP_NAME:-$(basename "$PWD")}"
-
-if [ -z "${DOCKERHUB_USERNAME:-}" ]; then
-  echo "Missing DOCKERHUB_USERNAME"
-  exit 1
-fi
+export APP_NAME="${APP_NAME:-$(basename "$PWD" | tr '[:upper:]' '[:lower:]')}"
+export DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME:?Missing DOCKERHUB_USERNAME}"
 
 echo "Deploying ${APP_NAME} using image tag: ${IMAGE_TAG}"
 docker compose -f docker-compose.prod.yml pull

@@ -5,5 +5,6 @@ RUN npm ci --omit=dev
 COPY index.js .
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
-EXPOSE 3001
+ARG PORT=3001
+EXPOSE ${PORT}
 CMD ["node", "index.js"]
