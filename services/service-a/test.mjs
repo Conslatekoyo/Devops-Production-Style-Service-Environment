@@ -22,13 +22,15 @@ describe('service-a', () => {
     assert.ok(body.port);
   });
 
-  it('GET /metrics returns 200 with correct shape', async () => {
+  it('GET /metrics returns Prometheus exposition format', async () => {
     const res = await fetch(`${BASE}/metrics`);
     assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.service, 'service-a');
-    assert.ok(typeof body.uptime_seconds === 'number');
-    assert.ok(typeof body.requests_total === 'number');
+    assert.match(res.headers.get('content-type'), /text\/plain/);
+    const body = await res.text();
+    assert.match(body, /# TYPE http_requests_total counter/);
+    assert.match(body, /# TYPE http_errors_total counter/);
+    assert.match(body, /# TYPE http_request_duration_seconds histogram/);
+    assert.match(body, /service_up\{service="service-a"\} 1/);
   });
 
   it('POST /greet-service-b returns 502 when service-b is unreachable', async () => {

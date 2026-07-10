@@ -1,4 +1,8 @@
+'use strict';
+require('./tracer');
+
 const express = require('express');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -7,26 +11,34 @@ const SERVICE_NAME = 'service-b';
 const SERVICE_C_URL = process.env.SERVICE_C_URL || 'http://service-c.internal:3003';
 const startTime = Date.now();
 
-const metrics = {
-  requests_total: 0,
-  requests_success: 0,
-  requests_failed: 0,
-  forwards_to_c: 0,
-  status_codes: {},
-  avg_response_time_ms: 0,
-  _response_times: []
+const HISTOGRAM_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+
+const promMetrics = {
+  requestsTotal: new Map(),
+  errorsTotal: new Map(),
+  duration: new Map()
 };
 
-function trackResponseTime(ms) {
-  metrics._response_times.push(ms);
-  if (metrics._response_times.length > 1000) metrics._response_times.shift();
-  metrics.avg_response_time_ms = Math.round(
-    metrics._response_times.reduce((a, b) => a + b, 0) / metrics._response_times.length
-  );
+function labelKey(method, route, status) {
+  return `${method}|${route}|${status}`;
 }
 
-function trackStatus(code) {
-  metrics.status_codes[code] = (metrics.status_codes[code] || 0) + 1;
+function incCounter(map, key) {
+  map.set(key, (map.get(key) || 0) + 1);
+}
+
+function observeDuration(method, route, seconds) {
+  const key = `${method}|${route}`;
+  let entry = promMetrics.duration.get(key);
+  if (!entry) {
+    entry = { buckets: new Map(HISTOGRAM_BUCKETS.map((b) => [b, 0])), sum: 0, count: 0 };
+    promMetrics.duration.set(key, entry);
+  }
+  entry.sum += seconds;
+  entry.count += 1;
+  for (const b of HISTOGRAM_BUCKETS) {
+    if (seconds <= b) entry.buckets.set(b, entry.buckets.get(b) + 1);
+  }
 }
 
 function clientIp(req) {
@@ -40,36 +52,112 @@ function log(entry) {
 
 app.use(express.json());
 
-app.get('/health', (req, res) => {
+// Prometheus metrics middleware
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+  res.on('finish', () => {
+    const seconds = Number(process.hrtime.bigint() - start) / 1e9;
+    const route = (req.route && req.route.path) || 'unmatched';
+    const status = res.statusCode;
+    incCounter(promMetrics.requestsTotal, labelKey(req.method, route, status));
+    if (status >= 400) incCounter(promMetrics.errorsTotal, labelKey(req.method, route, status));
+    observeDuration(req.method, route, seconds);
+  });
+  next();
+});
+
+// Advanced health check with dependency checking
+app.get('/health', async (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
-  log({ event: 'health_check', request_id: requestId, method: 'GET', path: '/health', status: 200, client_ip: clientIp(req) });
-  res.json({
+  let serviceCStatus = 'ok';
+
+  try {
+    const response = await fetch(`${SERVICE_C_URL}/health`, {
+      signal: AbortSignal.timeout(2000)
+    });
+    if (!response.ok) serviceCStatus = 'degraded';
+  } catch {
+    serviceCStatus = 'unreachable';
+  }
+
+  const overallStatus = serviceCStatus === 'ok' ? 'healthy' : 'degraded';
+  const httpStatus = overallStatus === 'healthy' ? 200 : 207;
+
+  log({
+    event: 'health_check',
+    request_id: requestId,
+    method: 'GET',
+    path: '/health',
+    status: httpStatus,
+    client_ip: clientIp(req),
+    dependencies: { 'service-c': serviceCStatus }
+  });
+
+  res.status(httpStatus).json({
     service: SERVICE_NAME,
-    status: 'healthy',
+    status: overallStatus,
     port: PORT,
-    message: `Hello ${SERVICE_NAME} listening on ${PORT}`
+    message: `Hello ${SERVICE_NAME} listening on ${PORT}`,
+    dependencies: { 'service-c': serviceCStatus }
   });
 });
 
 app.get('/metrics', (req, res) => {
-  res.json({
-    service: SERVICE_NAME,
-    uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
-    requests_total: metrics.requests_total,
-    requests_success: metrics.requests_success,
-    requests_failed: metrics.requests_failed,
-    forwards_to_c: metrics.forwards_to_c,
-    status_codes: metrics.status_codes,
-    avg_response_time_ms: metrics.avg_response_time_ms
-  });
+  const lines = [];
+
+  lines.push('# HELP http_requests_total Total number of HTTP requests');
+  lines.push('# TYPE http_requests_total counter');
+  for (const [key, count] of promMetrics.requestsTotal) {
+    const [method, route, status] = key.split('|');
+    lines.push(`http_requests_total{service="${SERVICE_NAME}",method="${method}",route="${route}",status_code="${status}"} ${count}`);
+  }
+
+  lines.push('# HELP http_errors_total Total number of HTTP requests with status >= 400');
+  lines.push('# TYPE http_errors_total counter');
+  for (const [key, count] of promMetrics.errorsTotal) {
+    const [method, route, status] = key.split('|');
+    lines.push(`http_errors_total{service="${SERVICE_NAME}",method="${method}",route="${route}",status_code="${status}"} ${count}`);
+  }
+
+  lines.push('# HELP http_request_duration_seconds HTTP request duration in seconds');
+  lines.push('# TYPE http_request_duration_seconds histogram');
+  for (const [key, entry] of promMetrics.duration) {
+    const [method, route] = key.split('|');
+    for (const b of HISTOGRAM_BUCKETS) {
+      lines.push(`http_request_duration_seconds_bucket{service="${SERVICE_NAME}",method="${method}",route="${route}",le="${b}"} ${entry.buckets.get(b)}`);
+    }
+    lines.push(`http_request_duration_seconds_bucket{service="${SERVICE_NAME}",method="${method}",route="${route}",le="+Inf"} ${entry.count}`);
+    lines.push(`http_request_duration_seconds_sum{service="${SERVICE_NAME}",method="${method}",route="${route}"} ${entry.sum.toFixed(6)}`);
+    lines.push(`http_request_duration_seconds_count{service="${SERVICE_NAME}",method="${method}",route="${route}"} ${entry.count}`);
+  }
+
+  lines.push('# HELP service_up Whether the service process is up (1) or not (0)');
+  lines.push('# TYPE service_up gauge');
+  lines.push(`service_up{service="${SERVICE_NAME}"} 1`);
+
+  lines.push('# HELP service_uptime_seconds Seconds since the service process started');
+  lines.push('# TYPE service_uptime_seconds counter');
+  lines.push(`service_uptime_seconds{service="${SERVICE_NAME}"} ${Math.floor((Date.now() - startTime) / 1000)}`);
+
+  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(lines.join('\n') + '\n');
 });
 
-// POST: mirrors service-a's /greet-service-b contract — this call forwards to
-// service-c and causes a downstream callback, so it is not a side-effect-free GET.
+// Controlled failure endpoints for observability testing
+app.get('/slow', async (req, res) => {
+  const delay = parseInt(req.query.ms) || 3000;
+  log({ event: 'slow_endpoint', delay_ms: delay, note: 'lab-only test endpoint' });
+  await new Promise(resolve => setTimeout(resolve, delay));
+  res.json({ service: SERVICE_NAME, status: 'ok', delay_ms: delay, note: 'lab-only' });
+});
+
+app.get('/fail', (req, res) => {
+  log({ event: 'fail_endpoint', status: 500, note: 'lab-only test endpoint' });
+  res.status(500).json({ service: SERVICE_NAME, status: 'error', message: 'Simulated failure', note: 'lab-only' });
+});
+
 app.post('/greet', async (req, res) => {
-  const reqStart = Date.now();
-  const requestId = req.headers['x-request-id'] || 'none';
-  metrics.requests_total++;
+  const requestId = req.headers['x-request-id'] || crypto.randomUUID();
   log({ event: 'request_received', request_id: requestId, method: 'POST', path: '/greet', source: 'service-a', client_ip: clientIp(req) });
 
   try {
@@ -77,17 +165,10 @@ app.post('/greet', async (req, res) => {
       method: 'POST',
       headers: { 'X-Request-ID': requestId }
     });
-    await response.json();
-    metrics.requests_success++;
-    metrics.forwards_to_c++;
-    trackStatus(response.status);
-    trackResponseTime(Date.now() - reqStart);
+    const data = await response.json();
     log({ event: 'request_forwarded', request_id: requestId, target: 'service-c', status: response.status });
-    res.json({ request_id: requestId, status: 'forwarded', target: 'service-c' });
+    res.json({ request_id: requestId, status: 'forwarded', message: data.message || 'Forwarded to service-c' });
   } catch (err) {
-    metrics.requests_failed++;
-    trackStatus(502);
-    trackResponseTime(Date.now() - reqStart);
     log({ event: 'request_failed', request_id: requestId, path: '/greet', status: 502, error: err.message });
     res.status(502).json({ request_id: requestId, status: 'error', message: 'Failed to reach service-c' });
   }
@@ -95,13 +176,12 @@ app.post('/greet', async (req, res) => {
 
 app.use((req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
-  metrics.requests_total++;
-  metrics.requests_failed++;
-  trackStatus(404);
   log({ event: 'route_not_found', request_id: requestId, method: req.method, path: req.path, status: 404, client_ip: clientIp(req) });
   res.status(404).json({ error: 'Not found', path: req.path });
 });
 
-app.listen(PORT, BIND_HOST, () => {
+const server = app.listen(PORT, BIND_HOST, () => {
   log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT, bind_host: BIND_HOST });
 });
+
+module.exports = server;
