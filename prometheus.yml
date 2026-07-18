@@ -7,17 +7,17 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  - job_name: "service-a"
+  - job_name: "booking-service"
     metrics_path: /metrics
     static_configs:
-      - targets: ["service-a:3001"]
+      - targets: ["booking-service:3001"]
 
-  - job_name: "service-b"
+  - job_name: "driver-service"
     metrics_path: /metrics
     static_configs:
-      - targets: ["service-b:3002"]
+      - targets: ["driver-service:3002"]
 
-  - job_name: "service-c"
+  - job_name: "tracking-service"
     metrics_path: /metrics
     static_configs:
-      - targets: ["service-c:3003"]
+      - targets: ["tracking-service:3003"]
