@@ -8,8 +8,8 @@ const { trace } = require('@opentelemetry/api');
 const app = express();
 const PORT = process.env.PORT || 3001;
 const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
-const SERVICE_NAME = 'service-a';
-const SERVICE_B_URL = process.env.SERVICE_B_URL || 'http://service-b.internal:3002';
+const SERVICE_NAME = 'booking-service';
+const DRIVER_SERVICE_URL = process.env.SERVICE_B_URL || 'http://service-b.internal:3002';
 
 const pendingCallbacks = new Map();
 const CALLBACK_TIMEOUT_MS = 10000;
@@ -120,21 +120,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// Advanced health check with dependency checking
+// Advanced health check - verifies driver-service is reachable
 app.get('/health', async (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
-  let serviceBStatus = 'ok';
+  let driverServiceStatus = 'ok';
 
   try {
-    const response = await fetch(`${SERVICE_B_URL}/health`, {
+    const response = await fetch(`${DRIVER_SERVICE_URL}/health`, {
       signal: AbortSignal.timeout(2000)
     });
-    if (!response.ok) serviceBStatus = 'degraded';
+    if (!response.ok) driverServiceStatus = 'degraded';
   } catch {
-    serviceBStatus = 'unreachable';
+    driverServiceStatus = 'unreachable';
   }
 
-  const overallStatus = serviceBStatus === 'ok' ? 'healthy' : 'degraded';
+  const overallStatus = driverServiceStatus === 'ok' ? 'healthy' : 'degraded';
   const httpStatus = overallStatus === 'healthy' ? 200 : 207;
 
   log({
@@ -144,15 +144,15 @@ app.get('/health', async (req, res) => {
     path: '/health',
     status: httpStatus,
     client_ip: clientIp(req),
-    dependencies: { 'service-b': serviceBStatus }
+    dependencies: { 'driver-service': driverServiceStatus }
   });
 
   res.status(httpStatus).json({
     service: SERVICE_NAME,
     status: overallStatus,
     port: PORT,
-    message: `Hello ${SERVICE_NAME} listening on ${PORT}`,
-    dependencies: { 'service-b': serviceBStatus }
+    message: `${SERVICE_NAME} listening on ${PORT}`,
+    dependencies: { 'driver-service': driverServiceStatus }
   });
 });
 
@@ -166,7 +166,7 @@ app.get('/metrics', (req, res) => {
     lines.push(`http_requests_total{service="${SERVICE_NAME}",method="${method}",route="${route}",status_code="${status}"} ${count}`);
   }
 
-  lines.push('# HELP http_errors_total Total number of HTTP requests with status >= 400');
+  lines.push('# HELP http_errors_total Total HTTP requests with status >= 400');
   lines.push('# TYPE http_errors_total counter');
   for (const [key, count] of promMetrics.errorsTotal) {
     const [method, route, status] = key.split('|');
@@ -185,15 +185,15 @@ app.get('/metrics', (req, res) => {
     lines.push(`http_request_duration_seconds_count{service="${SERVICE_NAME}",method="${method}",route="${route}"} ${entry.count}`);
   }
 
-  lines.push('# HELP service_up Whether the service process is up (1) or not (0)');
+  lines.push('# HELP service_up Whether the service is up (1) or not (0)');
   lines.push('# TYPE service_up gauge');
   lines.push(`service_up{service="${SERVICE_NAME}"} 1`);
 
-  lines.push('# HELP service_pending_callbacks Number of in-flight requests awaiting a downstream callback');
-  lines.push('# TYPE service_pending_callbacks gauge');
-  lines.push(`service_pending_callbacks{service="${SERVICE_NAME}"} ${pendingCallbacks.size}`);
+  lines.push('# HELP pending_rides Number of rides awaiting driver confirmation callback');
+  lines.push('# TYPE pending_rides gauge');
+  lines.push(`pending_rides{service="${SERVICE_NAME}"} ${pendingCallbacks.size}`);
 
-  lines.push('# HELP service_uptime_seconds Seconds since the service process started');
+  lines.push('# HELP service_uptime_seconds Seconds since service started');
   lines.push('# TYPE service_uptime_seconds counter');
   lines.push(`service_uptime_seconds{service="${SERVICE_NAME}"} ${Math.floor((Date.now() - startTime) / 1000)}`);
 
@@ -201,81 +201,118 @@ app.get('/metrics', (req, res) => {
   res.send(lines.join('\n') + '\n');
 });
 
-// Controlled failure endpoints for observability testing
+// Simulate slow booking (e.g. surge pricing calculation taking too long)
 app.get('/slow', async (req, res) => {
   const delay = parseInt(req.query.ms) || 3000;
-  log({ event: 'slow_endpoint', delay_ms: delay, note: 'lab-only test endpoint' });
+  log({ event: 'slow_booking_simulation', delay_ms: delay, note: 'lab-only' });
   await new Promise(resolve => setTimeout(resolve, delay));
-  res.json({ service: SERVICE_NAME, status: 'ok', delay_ms: delay, note: 'lab-only' });
+  res.json({ service: SERVICE_NAME, status: 'ok', delay_ms: delay, note: 'lab-only', scenario: 'surge pricing calculation timeout' });
 });
 
+// Simulate booking failure (e.g. payment declined)
 app.get('/fail', (req, res) => {
-  log({ event: 'fail_endpoint', status: 500, note: 'lab-only test endpoint' });
-  res.status(500).json({ service: SERVICE_NAME, status: 'error', message: 'Simulated failure', note: 'lab-only' });
+  log({ event: 'booking_failure_simulation', status: 500, note: 'lab-only', reason: 'payment_declined' });
+  res.status(500).json({ service: SERVICE_NAME, status: 'error', message: 'Payment declined', note: 'lab-only' });
 });
 
-app.post('/greet-service-b', async (req, res) => {
-  const requestId = req.headers['x-request-id'] || crypto.randomUUID();
+// Main endpoint: customer requests a ride
+app.post('/request-ride', async (req, res) => {
+  const rideId = req.headers['x-request-id'] || crypto.randomUUID();
   const ip = clientIp(req);
-  log({ event: 'request_received', request_id: requestId, method: 'POST', path: '/greet-service-b', client_ip: ip });
+  const pickup = req.body?.pickup || 'Westlands';
+  const dropoff = req.body?.dropoff || 'CBD';
+
+  log({
+    event: 'ride_requested',
+    ride_id: rideId,
+    method: 'POST',
+    path: '/request-ride',
+    client_ip: ip,
+    pickup,
+    dropoff
+  });
 
   const callbackPromise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      pendingCallbacks.delete(requestId);
+      pendingCallbacks.delete(rideId);
       reject(new Error('callback_timeout'));
     }, CALLBACK_TIMEOUT_MS);
-    pendingCallbacks.set(requestId, { resolve, timeout });
+    pendingCallbacks.set(rideId, { resolve, timeout });
   });
 
   try {
-    const response = await fetch(`${SERVICE_B_URL}/greet`, {
+    const response = await fetch(`${DRIVER_SERVICE_URL}/assign-driver`, {
       method: 'POST',
-      headers: { 'X-Request-ID': requestId }
+      headers: {
+        'X-Request-ID': rideId,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ ride_id: rideId, pickup, dropoff })
     });
     await response.json();
-    log({ event: 'request_forwarded', request_id: requestId, target: 'service-b', status: response.status });
+    log({ event: 'driver_assignment_requested', ride_id: rideId, target: 'driver-service', status: response.status });
   } catch (err) {
-    const pending = pendingCallbacks.get(requestId);
-    if (pending) {
-      clearTimeout(pending.timeout);
-      pendingCallbacks.delete(requestId);
-    }
-    log({ event: 'request_failed', request_id: requestId, path: '/greet-service-b', status: 502, error: err.message });
-    return res.status(502).json({ request_id: requestId, status: 'error', message: 'Failed to reach service-b' });
+    const pending = pendingCallbacks.get(rideId);
+    if (pending) { clearTimeout(pending.timeout); pendingCallbacks.delete(rideId); }
+    log({ event: 'driver_assignment_failed', ride_id: rideId, status: 502, error: err.message });
+    return res.status(502).json({ ride_id: rideId, status: 'error', message: 'Failed to reach driver-service' });
   }
 
   try {
     const callbackData = await callbackPromise;
     log({
-      event: 'callback_received',
-      request_id: requestId,
-      source_service: callbackData.source_service,
+      event: 'ride_confirmed',
+      ride_id: rideId,
+      driver: callbackData.driver,
+      eta_minutes: callbackData.eta_minutes,
       status: 200
     });
-    res.json({ request_id: requestId, status: 'success', message: 'Request completed successfully' });
+    res.json({
+      ride_id: rideId,
+      status: 'confirmed',
+      message: 'Driver on the way',
+      driver: callbackData.driver || 'Brian',
+      eta_minutes: callbackData.eta_minutes || 4,
+      pickup,
+      dropoff
+    });
   } catch (err) {
-    log({ event: 'callback_timeout', request_id: requestId, status: 504, error: err.message });
-    res.status(504).json({ request_id: requestId, status: 'error', message: 'Callback timeout from service-c' });
+    log({ event: 'ride_confirmation_timeout', ride_id: rideId, status: 504, error: err.message });
+    res.status(504).json({ ride_id: rideId, status: 'error', message: 'No drivers available — please try again' });
   }
 });
 
-app.post('/greeting-rcvd', (req, res) => {
+// Callback from tracking-service confirming ride is active
+app.post('/ride-confirmed', (req, res) => {
   const body = req.body;
-  const requestId = body.request_id || req.headers['x-request-id'] || 'none';
-  log({ event: 'callback_received', request_id: requestId, source_service: body.source_service, method: 'POST', path: '/greeting-rcvd', status: 200, client_ip: clientIp(req) });
-  const pending = pendingCallbacks.get(requestId);
-  if (pending) { clearTimeout(pending.timeout); pendingCallbacks.delete(requestId); pending.resolve(body); }
+  const rideId = body.ride_id || req.headers['x-request-id'] || 'none';
+  log({
+    event: 'tracking_callback_received',
+    ride_id: rideId,
+    driver: body.driver,
+    eta_minutes: body.eta_minutes,
+    method: 'POST',
+    path: '/ride-confirmed',
+    status: 200,
+    client_ip: clientIp(req)
+  });
+  const pending = pendingCallbacks.get(rideId);
+  if (pending) {
+    clearTimeout(pending.timeout);
+    pendingCallbacks.delete(rideId);
+    pending.resolve(body);
+  }
   res.json({ status: 'received' });
 });
 
 app.use((req, res) => {
-  const requestId = req.headers['x-request-id'] || 'none';
-  log({ event: 'route_not_found', request_id: requestId, method: req.method, path: req.path, status: 404, client_ip: clientIp(req) });
+  const rideId = req.headers['x-request-id'] || 'none';
+  log({ event: 'route_not_found', ride_id: rideId, method: req.method, path: req.path, status: 404, client_ip: clientIp(req) });
   res.status(404).json({ error: 'Not found', path: req.path });
 });
 
 const server = app.listen(PORT, BIND_HOST, () => {
-  log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT, bind_host: BIND_HOST });
+  log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT });
 });
 
 module.exports = server;

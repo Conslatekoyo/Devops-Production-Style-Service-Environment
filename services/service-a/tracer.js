@@ -11,16 +11,12 @@ const exporter = new JaegerExporter({
 
 const sdk = new NodeSDK({
   resource: resourceFromAttributes({
-    [ATTR_SERVICE_NAME]: 'service-a',
+    [ATTR_SERVICE_NAME]: 'booking-service',
   }),
   traceExporter: exporter,
   instrumentations: [getNodeAutoInstrumentations()],
 });
 
 sdk.start();
-
-process.on('SIGTERM', () => {
-  sdk.shutdown().then(() => process.exit(0));
-});
-
+process.on('SIGTERM', () => sdk.shutdown().then(() => process.exit(0)));
 module.exports = sdk;

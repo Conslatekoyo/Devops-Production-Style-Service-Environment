@@ -480,254 +480,165 @@ curl -i -X POST http://localhost:8080/service-a/greet-service-b \
 ```
 Expected: `200 OK` with a success message -- the system recovers automatically once Service B is back up.
 
+
 ## Distributed Tracing (Jaeger)
 
-All three services are instrumented with OpenTelemetry and export traces to Jaeger automatically. Every inbound and outbound HTTP call is traced, with spans propagated across the full A -> B -> C -> A(callback) chain.
+All three services are instrumented with OpenTelemetry. Every HTTP request is traced end-to-end across the full booking-service -> driver-service -> tracking-service -> booking-service(callback) chain.
 
-**Access Jaeger UI:****Confirm all three services appear in Jaeger:**
+**Access Jaeger UI:**
+```
+http://localhost:16686
+```
+
+**Confirm all three services are sending traces:**
 ```bash
 curl -s http://localhost:16686/api/services | python3 -m json.tool
 ```
-Expected: `service-a`, `service-b`, and `service-c` all listed.
+Expected: `booking-service`, `driver-service`, and `tracking-service` all listed.
 
-**View traces for a specific request:**
+**View a ride booking trace:**
 ```bash
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
-  -H "X-Request-ID: trace-demo-001" \
-  -H "Content-Type: application/json"
+curl -s -X POST http://localhost:8080/booking-service/request-ride \
+  -H "Content-Type: application/json" \
+  -H "X-Request-ID: demo-ride-001" \
+  -d '{"pickup": "Westlands", "dropoff": "CBD"}' | python3 -m json.tool
 ```
-Then open http://localhost:16686, select `service-a` from the Service dropdown, and search for traces. You will see the full span tree: service-a -> service-b -> service-c -> service-a(callback).
+Then open http://localhost:16686, select `booking-service`, click Find Traces.
+Click the `POST /request-ride` trace to see the full waterfall -- every hop
+across all three services with exact timing per span.
+
+**What the scatter plot shows:**
+Each dot is one request. Y-axis = duration, X-axis = time. Bigger dots took
+longer. A cluster of dots shooting upward means something slowed down.
+
+**What a trace looks like:**
+```
+booking-service: POST /request-ride          [total: ~8ms]
+  |
+  +-- calls driver-service                   [~1ms]
+        |
+        +-- driver-service: POST /assign-driver    [~5ms]
+              |
+              +-- calls tracking-service           [~1ms]
+                    |
+                    +-- tracking-service: POST /start-tracking  [~3ms]
+                          |
+                          +-- calls back booking-service        [~1ms]
+```
 
 ---
 
 ## Advanced Health Endpoints
 
-Every service exposes an enhanced `/health` endpoint that actively checks its downstream dependencies and returns a `degraded` status if they are unreachable -- rather than always returning `healthy` regardless of system state.
+Each service checks its downstream dependency before reporting healthy.
+booking-service pings driver-service, driver-service pings tracking-service.
+tracking-service has no dependencies so it always reports healthy.
 
-| Service | Checks | Degraded when |
-|---------|--------|---------------|
-| service-a | service-b reachability | service-b returns non-200 or times out (2s) |
-| service-b | service-c reachability | service-c returns non-200 or times out (2s) |
-| service-c | none (leaf service) | never degraded |
+If driver-service is unreachable, booking-service reports `degraded` -- not
+`healthy`. This lets load balancers and monitoring systems detect the real
+problem immediately instead of sending traffic to a service that will fail anyway.
 
-**Test normal healthy state:**
+**Normal state:**
 ```bash
-curl -s http://localhost:8080/service-a/health | python3 -m json.tool
+curl -s http://localhost:8080/booking-service/health | python3 -m json.tool
 ```
-Expected:
 ```json
 {
-    "service": "service-a",
+    "service": "booking-service",
     "status": "healthy",
-    "port": "3001",
     "dependencies": {
-        "service-b": "ok"
+        "driver-service": "ok"
     }
 }
 ```
 
-**Test degraded state:**
+**Degraded state -- stop driver-service:**
 ```bash
-docker compose stop service-b
-curl -s http://localhost:8080/service-a/health | python3 -m json.tool
+docker compose stop driver-service
+curl -s http://localhost:8080/booking-service/health | python3 -m json.tool
 ```
-Expected: HTTP 207 with `"status": "degraded"` and `"service-b": "unreachable"`.
+```json
+{
+    "service": "booking-service",
+    "status": "degraded",
+    "dependencies": {
+        "driver-service": "unreachable"
+    }
+}
+```
+HTTP status also changes from 200 to 207 when degraded.
 
 **Recover:**
 ```bash
-docker compose start service-b
+docker compose start driver-service
 ```
 
 ---
 
 ## Failure Demo Endpoints
 
-Each service exposes two lab-only controlled failure endpoints for observability testing and load test scenarios. Responses and logs include `note: lab-only`.
+Each service has `/slow` and `/fail` endpoints for testing the observability
+stack. All responses include `"note": "lab-only"`.
 
-### `/slow` -- simulated latency
+| Endpoint | Simulates |
+|----------|-----------|
+| `GET /slow?ms=N` | GPS lag, slow DB query, network congestion |
+| `GET /fail` | Payment declined, third-party API down |
 
+**Test slow endpoint (latency spike in Grafana):**
 ```bash
-curl -i "http://localhost:8080/service-a/slow?ms=500"
+curl -i "http://localhost:8080/booking-service/slow?ms=1000"
 ```
-Expected: HTTP 200 after the delay with `delay_ms` in body.
+Expected: HTTP 200 after 1 second delay. Watch p95 Latency panel spike in Grafana.
 
-### `/fail` -- simulated 500 error
-
+**Test fail endpoint (error rate in Grafana):**
 ```bash
-curl -i http://localhost:8080/service-a/fail
+curl -i http://localhost:8080/booking-service/fail
 ```
-Expected: HTTP 500 with `"status": "error"` and `"message": "Simulated failure"`.
+Expected: HTTP 500 with `"message": "Payment declined"`.
 
-Both endpoints available on all three services:
+**Generate a visible error rate on the dashboard:**
 ```bash
-docker compose exec service-a wget -qO- "http://service-b:3002/slow?ms=200"
-docker compose exec service-a wget -qO- http://service-c:3003/fail
+for i in $(seq 1 20); do
+  curl -s http://localhost:8080/booking-service/fail > /dev/null
+  curl -s -X POST http://localhost:8080/booking-service/request-ride \
+    -H "Content-Type: application/json" \
+    -d '{"pickup": "Westlands", "dropoff": "CBD"}' > /dev/null
+done
 ```
+This produces ~50% error rate on the Grafana Error Rate panel.
 
-Generate observable traffic for Prometheus, Grafana, and Jaeger:
+**Test on internal services (not exposed through Nginx):**
 ```bash
-for i in $(seq 1 5); do curl -s -o /dev/null "http://localhost:8080/service-a/slow?ms=1000"; done
-for i in $(seq 1 10); do curl -s -o /dev/null http://localhost:8080/service-a/fail; done
-open http://localhost:16686
-```
-
-
-### Shut everything down
-
-```bash
-docker compose down
-```
-
-### Key differences from VM deployment
-
-| VM version | Docker Compose version |
-|------------|----------------------|
-| systemd starts services | Compose starts containers |
-| `/etc/hosts` service names | Compose DNS service names |
-| `journalctl` logs | `docker compose logs` |
-| UFW + loopback bind | Docker networks + no published ports |
-| VM restart policy | `restart: unless-stopped` |
-| Services bind to `127.0.0.1` | Services bind to `0.0.0.0` (isolated by Docker networking) |
-
-See [docs/CONTAINER_VALIDATION.md](docs/CONTAINER_VALIDATION.md) for full validation evidence.
-
-## Uninstall (VM deployment)
-
-```bash
-sudo bash scripts/uninstall.sh
+docker compose exec booking-service wget -qO- "http://driver-service:3002/slow?ms=1000"
+docker compose exec booking-service wget -qO- http://tracking-service:3003/fail
 ```
 
-Removes all services, Nginx config, `/etc/hosts` entries, firewall rules, and application files.
-
-## Container CI/CD Deployment
-
-### Latest deployed version
-
-Commit:
-`929e3fb5662cafeede55fc763584a59e55742fd5`
-
-Image tag:
-`sha-929e3fb`
-
-Images (public on Docker Hub):
-- `glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb`
-- `glorywachira/devops-production-style-service-environment-service-b:sha-929e3fb`
-- `glorywachira/devops-production-style-service-environment-service-c:sha-929e3fb`
-
-Prove the images are pullable and commit-pinned:
+**Full observability test sequence:**
 ```bash
-docker pull glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb
-docker image inspect glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb   --format "{{index .Config.Labels \"org.opencontainers.image.revision\"}}"
-```
+# Normal ride bookings (baseline)
+for i in $(seq 1 10); do
+  curl -s -X POST http://localhost:8080/booking-service/request-ride \
+    -H "Content-Type: application/json" \
+    -d '{"pickup": "Westlands", "dropoff": "CBD"}' > /dev/null
+done
 
-### What was fixed after instructor review
+# Introduce errors (watch error rate climb in Grafana)
+for i in $(seq 1 10); do
+  curl -s http://localhost:8080/booking-service/fail > /dev/null
+done
 
-1. **Real tests added** -- Node built-in test runner (`node --test`), no extra dependencies.
-   Each service has a `test.mjs` file with real HTTP assertions: `/health` returns 200,
-   downstream failure returns 502, unknown routes return 404.
-2. **Deploy path fixed** -- `APP_NAME` is now lowercased in `deploy.sh` and `.env.example`.
-   Docker Hub requires lowercase image names; the deploy script now handles this correctly.
-3. **Dev Compose mirrors prod** -- `docker-compose.yml` now has the same frontend/backend
-   network segmentation as `docker-compose.prod.yml`. CI verifies the same topology you deploy.
-4. **Healthchecks added** -- All services have `healthcheck` blocks using a Node one-liner
-   (no curl needed in alpine). `depends_on` uses `condition: service_healthy` so startup
-   order is readiness-gated, not just start-order.
-5. **EXPOSE fixed** -- Dockerfile uses `ARG PORT=3001` + `EXPOSE ${PORT}`, and the CI
-   workflow passes `--build-arg PORT=<port>` per service so each image documents its real port.
-6. **Prod variables fail loudly** -- `IMAGE_TAG` uses `${IMAGE_TAG:?IMAGE_TAG is required}`
-   in `docker-compose.prod.yml` so a missing tag causes an immediate clear error.
+# Introduce latency (watch p95 latency spike in Grafana)
+curl -s "http://localhost:8080/booking-service/slow?ms=3000" > /dev/null
 
-### Peer reviewer instructions
+# Stop driver-service (watch dashboard go RED in Grafana)
+docker compose stop driver-service
+sleep 15
+curl -s http://localhost:8080/booking-service/health | python3 -m json.tool
 
-**1. Clone the repo and switch to main**
-```bash
-git clone https://github.com/Conslatekoyo/Devops-Production-Style-Service-Environment.git
-cd Devops-Production-Style-Service-Environment
-git checkout main
-```
+# Recover (watch dashboard go GREEN)
+docker compose start driver-service
 
-**2. Verify the CI pipeline**
-
-Go to Actions and confirm the latest run on main is green:
-https://github.com/Conslatekoyo/Devops-Production-Style-Service-Environment/actions
-
-**3. Pull the published images from Docker Hub**
-```bash
-docker pull glorywachira/devops-production-style-service-environment-service-a:sha-929e3fb
-docker pull glorywachira/devops-production-style-service-environment-service-b:sha-929e3fb
-docker pull glorywachira/devops-production-style-service-environment-service-c:sha-929e3fb
-```
-
-**4. Set up environment and deploy**
-```bash
-cp .env.example .env
-export DOCKERHUB_USERNAME=glorywachira
-export APP_NAME=devops-production-style-service-environment
-./scripts/deploy.sh sha-929e3fb
-```
-
-**5. Verify the stack is running**
-```bash
-docker compose -f docker-compose.prod.yml ps
-```
-Expected: nginx, service-a, service-b, service-c all Up and healthy.
-
-**6. Test the public route through Nginx**
-```bash
-curl -i http://localhost:8080/service-a/health
-```
-Expected: HTTP 200 with a JSON health response from service-a.
-
-**7. Prove B and C are internal only**
-```bash
-curl --connect-timeout 3 http://localhost:3002/health
-curl --connect-timeout 3 http://localhost:3003/health
-```
-Expected: connection refused on both.
-
-**8. Test the full request flow**
-```bash
-curl -i -X POST http://localhost:8080/service-a/greet-service-b   -H "X-Request-ID: peer-review-001"   -H "Content-Type: application/json"
-```
-Expected: HTTP 200 with status success. Note: this endpoint is POST only -- GET returns 404.
-
-**9. Trace the request across services**
-```bash
-docker compose -f docker-compose.prod.yml logs | grep peer-review-001
-```
-Expected: same request ID visible in service-a, service-b, and service-c logs.
-
-**10. Stop service-b and observe failure**
-```bash
-docker compose -f docker-compose.prod.yml stop service-b
-curl -i -X POST http://localhost:8080/service-a/greet-service-b   -H "X-Request-ID: fail-test-001"   -H "Content-Type: application/json"
-```
-Expected: HTTP 502 with a clear error message.
-
-**11. Recover service-b**
-```bash
-docker compose -f docker-compose.prod.yml start service-b
-curl -i -X POST http://localhost:8080/service-a/greet-service-b   -H "X-Request-ID: recovery-001"   -H "Content-Type: application/json"
-```
-Expected: HTTP 200 -- system recovers automatically.
-
-**12. Shut everything down**
-```bash
-docker compose -f docker-compose.prod.yml down
-```
-
-### Deploy (quick reference)
-
-```bash
-cp .env.example .env
-export DOCKERHUB_USERNAME=glorywachira
-export APP_NAME=devops-production-style-service-environment
-./scripts/deploy.sh sha-929e3fb
-```
-
-### Verify
-
-```bash
-docker compose -f docker-compose.prod.yml ps
-curl http://localhost:8080/service-a/health
+# Open Jaeger to see all traces from above
+# http://localhost:16686 -> booking-service -> Find Traces
 ```
