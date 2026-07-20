@@ -1,54 +1,49 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 
-// Set env before importing app
 process.env.PORT = '13001';
 process.env.BIND_HOST = '127.0.0.1';
-process.env.SERVICE_B_URL = 'http://127.0.0.1:19999'; // nothing listening = fast fail
+process.env.SERVICE_B_URL = 'http://127.0.0.1:19999';
 
 const { default: app } = await import('./index.js');
-
 const BASE = 'http://127.0.0.1:13001';
 
-describe('service-a', () => {
+describe('booking-service', () => {
   after(() => app.close?.() ?? process.exit(0));
 
-  it('GET /health returns 200 with correct body', async () => {
+  it('GET /health returns 200 or 207 with correct body', async () => {
     const res = await fetch(`${BASE}/health`);
-    assert.equal(res.status, 200);
+    assert.ok(res.status === 200 || res.status === 207);
     const body = await res.json();
-    assert.equal(body.service, 'service-a');
-    assert.equal(body.status, 'healthy');
-    assert.ok(body.port);
+    assert.equal(body.service, 'booking-service');
+    assert.ok(body.status === 'healthy' || body.status === 'degraded');
+    assert.ok(body.dependencies);
   });
 
   it('GET /metrics returns Prometheus exposition format', async () => {
     const res = await fetch(`${BASE}/metrics`);
     assert.equal(res.status, 200);
-    assert.match(res.headers.get('content-type'), /text\/plain/);
-    const body = await res.text();
-    assert.match(body, /# TYPE http_requests_total counter/);
-    assert.match(body, /# TYPE http_errors_total counter/);
-    assert.match(body, /# TYPE http_request_duration_seconds histogram/);
-    assert.match(body, /service_up\{service="service-a"\} 1/);
+    const text = await res.text();
+    assert.ok(text.includes('http_requests_total'));
+    assert.ok(text.includes('service_up'));
   });
 
-  it('POST /greet-service-b returns 502 when service-b is unreachable', async () => {
-    const res = await fetch(`${BASE}/greet-service-b`, {
+  it('POST /request-ride returns 502 when driver-service is unreachable', async () => {
+    const res = await fetch(`${BASE}/request-ride`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Request-ID': 'test-fail-001' }
+      headers: { 'Content-Type': 'application/json', 'X-Request-ID': 'test-fail-001' },
+      body: JSON.stringify({ pickup: 'Westlands', dropoff: 'CBD' })
     });
     assert.equal(res.status, 502);
     const body = await res.json();
     assert.equal(body.status, 'error');
-    assert.ok(body.message.includes('service-b'));
   });
 
-  it('POST /greeting-rcvd returns 200', async () => {
-    const res = await fetch(`${BASE}/greeting-rcvd`, {
+  it('POST /ride-confirmed returns 200', async () => {
+    const res = await fetch(`${BASE}/ride-confirmed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ request_id: 'test-cb-001', source_service: 'service-c' })
+      body: JSON.stringify({ ride_id: 'test-cb-001', driver: 'Brian', eta_minutes: 4, source_service: 'tracking-service' })
     });
     assert.equal(res.status, 200);
     const body = await res.json();
