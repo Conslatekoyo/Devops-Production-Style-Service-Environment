@@ -17,14 +17,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - service: service-a
-            path: ./services/service-a
+          - service: booking-service
+            path: ./services/booking-service
             port: 3001
-          - service: service-b
-            path: ./services/service-b
+          - service: driver-service
+            path: ./services/driver-service
             port: 3002
-          - service: service-c
-            path: ./services/service-c
+          - service: tracking-service
+            path: ./services/tracking-service
             port: 3003
     steps:
       - name: Checkout repository
@@ -83,7 +83,7 @@ jobs:
 
       - name: Check gateway health
         run: |
-          curl --fail http://localhost:8080/service-a/health
+          curl --fail http://localhost:8080/booking-service/health
 
       - name: Stop Compose stack
         if: always()
@@ -97,14 +97,14 @@ jobs:
     strategy:
       matrix:
         include:
-          - service: service-a
-            path: ./services/service-a
+          - service: booking-service
+            path: ./services/booking-service
             port: 3001
-          - service: service-b
-            path: ./services/service-b
+          - service: driver-service
+            path: ./services/driver-service
             port: 3002
-          - service: service-c
-            path: ./services/service-c
+          - service: tracking-service
+            path: ./services/tracking-service
             port: 3003
     steps:
       - name: Checkout repository
