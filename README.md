@@ -208,6 +208,70 @@ grep "$REQID" /var/log/nginx/service-proxy-access.log
 
 The `request_id` appears in: Nginx access log -> Service A (`request_received`, `request_forwarded`, `callback_received`) -> Service B (`request_received`, `request_forwarded`) -> Service C (`request_received`, `callback_sent`).
 
+## Error Rate Alerting (Slack)
+
+`scripts/error-alert-monitor.js` polls each service's `/metrics` endpoint on an interval, computes the **error rate over that interval** (not the cumulative rate since boot), and posts to Slack when it crosses a threshold. It runs continuously as its own process -- a Docker Compose service in the container deployment, or a systemd unit in the VM deployment -- and is the only thing in the repo that needs a Slack webhook.
+
+**Why windowed, not cumulative:** the Prometheus-style counters (`http_requests_total`, `http_errors_total`) never reset, so `errors / requests` since boot would just decay toward a small number forever and never reflect "how bad is it right now." The monitor snapshots the previous poll and diffs against the current one each cycle instead.
+
+**Metrics format:** `/metrics` is served in Prometheus text exposition format (see [Observability stack](#observability-stack-prometheus--grafana)), e.g. `http_requests_total{service="booking-service",method="POST",route="/request-ride",status_code="200"} 5`. The monitor sums `http_requests_total` and `http_errors_total` across all route/method/status label combinations for that service to get one total/failed count per poll -- it doesn't call the Prometheus server itself, it reads each service's raw `/metrics` output directly, the same way Prometheus's own scraper does.
+
+### Setup
+
+1. Create a Slack Incoming Webhook: `https://api.slack.com/apps` -> **Create New App** -> **From scratch** -> pick the exact workspace you'll actually be checking (if you have multiple workspaces with similar names, verify by team ID in the URL, e.g. `app.slack.com/client/T0XXXXXXX/...`, not just by display name) -> **Incoming Webhooks** -> activate -> **Add New Webhook to Workspace** -> pick a channel -> copy the URL.
+2. Set `SLACK_WEBHOOK_URL` in `.env` (see `.env.example`). This file is gitignored -- never commit a real webhook URL.
+3. Sanity-check the webhook directly before relying on it:
+   ```bash
+   curl -X POST -H 'Content-type: application/json' \
+     --data '{"text":"test"}' \
+     "$SLACK_WEBHOOK_URL"
+   ```
+   A response of `ok` means Slack accepted it -- if nothing shows up in Slack afterward, you're looking at the wrong workspace or channel, not a broken webhook.
+
+### Configuration
+
+All variables are read from the environment; defaults apply if unset.
+
+| Variable | Default | Description |
+|----------|---------|--------------|
+| `SLACK_WEBHOOK_URL` | *(required)* | Incoming Webhook URL to post alerts to |
+| `SERVICES` | `booking-service`/`driver-service`/`tracking-service` via the old `service-a/b/c.internal` hostnames (matches the VM deployment's current wiring) | Comma-separated `name=metrics_url` pairs to monitor |
+| `ERROR_THRESHOLD_PERCENT` | `20` | Error rate (%) that triggers an alert |
+| `CHECK_INTERVAL_SECONDS` | `60` | How often to poll `/metrics` and evaluate the rate |
+| `MIN_REQUESTS_SAMPLE` | `5` | Minimum requests in the interval before a rate is evaluated (avoids false alarms on low traffic, e.g. 1 failed out of 1 request = "100%") |
+| `ALERT_COOLDOWN_SECONDS` | `900` | Minimum time between repeat alerts for the same service while a breach persists |
+| `METRICS_TIMEOUT_MS` | `3000` | Timeout for each `/metrics` fetch |
+
+**Note on naming:** the services were renamed `service-a/b/c` -> `booking-service`/`driver-service`/`tracking-service`, but that rename isn't complete everywhere yet -- `docker-compose.yml` (dev) and CI use the new names, while `docker-compose.prod.yml` and the systemd units still use the old ones. The monitor's `SERVICES` config always uses the new friendly names as labels in Slack messages regardless of environment, but points at whatever hostnames that environment's compose file or systemd wiring actually uses -- see `docker-compose.yml` vs `docker-compose.prod.yml` for the two different `SERVICES` values in use.
+
+### Behavior
+
+- **Breach:** error rate >= `ERROR_THRESHOLD_PERCENT` over the interval -> `:rotating_light:` alert with the service name, computed rate, and the raw `failed/total` counts for that window.
+- **Recovery:** rate drops back below the threshold after a breach -> `:white_check_mark:` message, then it goes quiet again.
+- **Cooldown:** a persisting breach re-alerts only after `ALERT_COOLDOWN_SECONDS`, not every interval.
+- **Unreachable service:** if a `/metrics` fetch fails outright (service down, not just erroring), that's treated as its own breach (`:x:` outage alert) and recovers the same way once `/metrics` responds again.
+
+### Where it runs
+
+- **Docker Compose:** an `error-alert-monitor` service in `docker-compose.yml` / `docker-compose.prod.yml`, using the `node:20-alpine` image with the script mounted read-only, on the `backend` network. `SLACK_WEBHOOK_URL` is required (`${SLACK_WEBHOOK_URL:?...}`) -- Compose auto-loads it from a `.env` file in the project root, so `docker compose up` fails loudly if it's missing.
+- **VM/systemd:** `systemd/error-alert-monitor.service`, same pattern as the other units, pulling `SLACK_WEBHOOK_URL` from `/opt/production-services/.env` via `EnvironmentFile=`.
+
+### Verifying it
+
+```bash
+# 1. Confirm a clean baseline (0% error rate) with normal traffic
+curl -X POST http://localhost:8080/booking-service/request-ride
+
+# 2. Force real failures
+docker compose stop driver-service
+for i in {1..8}; do curl -s -X POST http://localhost:8080/booking-service/request-ride > /dev/null; done
+
+# 3. Check Slack for the alert(s), then recover
+docker compose start driver-service
+curl -X POST http://localhost:8080/booking-service/request-ride
+# Check Slack again for the recovery message
+```
+
 ## Systemd
 
 - **Dependency order:** A starts `After` B and C, and `Wants` them as soft dependencies -- systemd starts B and C first if not already running, but A is not forced down if one later stops. A detects an unreachable dependency in its own request handling and returns a 502, rather than relying on systemd to take it down.
@@ -318,25 +382,28 @@ docker compose up -d
 
 ### Start the system
 
+`SLACK_WEBHOOK_URL` is required (the `error-alert-monitor` service needs it) -- make sure it's set in a `.env` file at the project root first; Compose loads it automatically. See [Error Rate Alerting](#error-rate-alerting-slack) for how to get one.
+
 ```bash
 docker compose up --build -d
 ```
 
 **Expected output** (after a successful build, or after building manually per above):
 ```
-Container nginx       Started
-Container booking-service   Started
-Container driver-service   Started
-Container tracking-service   Started
-Container prometheus  Started
-Container grafana     Started
+Container nginx                  Started
+Container booking-service        Started
+Container driver-service         Started
+Container tracking-service       Started
+Container prometheus             Started
+Container grafana                Started
+Container error-alert-monitor    Started
 ```
 
-Confirm all six are running:
+Confirm all seven are running:
 ```bash
 docker compose ps
 ```
-Expected: all six containers (`nginx`, `booking-service`, `driver-service`, `tracking-service`, `prometheus`, `grafana`) show `Up`.
+Expected: all seven containers (`nginx`, `booking-service`, `driver-service`, `tracking-service`, `prometheus`, `grafana`, `error-alert-monitor`) show `Up`.
 
 ### Test the public route
 
@@ -435,6 +502,8 @@ config in [grafana/provisioning/](grafana/provisioning/)) and shows:
 - Error rate % per service (`http_errors_total` / `http_requests_total`)
 - p95 latency per service (`histogram_quantile(0.95, ...http_request_duration_seconds_bucket...)`)
 - Alert state (populated once alert rules are added to Prometheus)
+
+Slack notifications for a sustained high error rate don't depend on Prometheus/Grafana at all -- they come from a separate lightweight poller reading each service's raw `/metrics` directly; see [Error Rate Alerting](#error-rate-alerting-slack).
 
 Send some traffic and refresh the dashboard to see the panels move:
 
