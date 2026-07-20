@@ -307,7 +307,7 @@ sudo systemctl restart docker
 
 If builds still fail after that (container DNS can still be broken even with NAT rules present, e.g. due to conntrack issues), build each image directly with host networking, which bypasses the bridge entirely for the build step only:
 ```bash
-docker build --network=host --no-cache -t devops-production-style-service-environment-service-a ./services/service-a -f services/Dockerfile
+docker build --network=host --no-cache -t devops-production-style-service-environment-booking-service ./services/booking-service -f services/Dockerfile
 docker build --network=host --no-cache -t devops-production-style-service-environment-service-b ./services/service-b -f services/Dockerfile
 docker build --network=host --no-cache -t devops-production-style-service-environment-service-c ./services/service-c -f services/Dockerfile
 ```
@@ -325,9 +325,9 @@ docker compose up --build -d
 **Expected output** (after a successful build, or after building manually per above):
 ```
 Container nginx       Started
-Container service-a   Started
-Container service-b   Started
-Container service-c   Started
+Container booking-service   Started
+Container driver-service   Started
+Container tracking-service   Started
 Container prometheus  Started
 Container grafana     Started
 ```
@@ -336,22 +336,22 @@ Confirm all six are running:
 ```bash
 docker compose ps
 ```
-Expected: all six containers (`nginx`, `service-a`, `service-b`, `service-c`, `prometheus`, `grafana`) show `Up`.
+Expected: all six containers (`nginx`, `booking-service`, `driver-service`, `tracking-service`, `prometheus`, `grafana`) show `Up`.
 
 ### Test the public route
 
 ```bash
-curl -i http://localhost:8080/service-a/health
+curl -i http://localhost:8080/booking-service/health
 ```
 Expected:
 ```
 HTTP/1.1 200 OK
-{"service":"service-a","status":"healthy","port":"3001","message":"Hello service-a listening on 3001"}
+{"service":"booking-service","status":"healthy","port":"3001","message":"booking-service listening on 3001"}
 ```
 
 Full request flow (A -> B -> C -> A callback):
 ```bash
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+curl -i -X POST http://localhost:8080/booking-service/request-ride \
   -H "Content-Type: application/json"
 ```
 Expected:
@@ -375,7 +375,7 @@ curl: (7) Failed to connect to localhost port 3003 after 0 ms: Couldn't connect 
 
 From inside the Docker network, they work. Note: the `node:20-alpine` images don't include `curl`, so use `wget`:
 ```bash
-docker compose exec service-a wget -qO- http://service-b:3002/health
+docker compose exec booking-service wget -qO- http://driver-service:3002/health
 docker compose exec service-b wget -qO- http://service-c:3003/health
 ```
 Expected:
@@ -388,7 +388,7 @@ Expected:
 
 ```bash
 docker compose logs                  # all services
-docker compose logs service-a        # single service
+docker compose logs booking-service        # single service
 docker compose logs nginx            # Nginx access/error logs
 ```
 
@@ -408,8 +408,8 @@ Docker Compose service names (see [prometheus.yml](prometheus.yml) -- no hardcod
 **View raw metrics from a service:**
 
 ```bash
-curl http://localhost:8080/service-a/metrics
-docker compose exec service-a wget -qO- http://service-b:3002/metrics
+curl http://localhost:8080/booking-service/metrics
+docker compose exec booking-service wget -qO- http://driver-service:3002/metrics
 ```
 
 **Confirm Prometheus is scraping all services:**
@@ -430,7 +430,7 @@ The "Central Operating View" dashboard is auto-provisioned from
 [grafana/dashboards/operating-view.json](grafana/dashboards/operating-view.json) (datasource
 config in [grafana/provisioning/](grafana/provisioning/)) and shows:
 
-- Service up/down status (`up{job=~"service-a|service-b|service-c"}`)
+- Service up/down status (`up{job=~"booking-service|driver-service|tracking-service"}`)
 - Request rate per service (`rate(http_requests_total[1m])`)
 - Error rate % per service (`http_errors_total` / `http_requests_total`)
 - p95 latency per service (`histogram_quantile(0.95, ...http_request_duration_seconds_bucket...)`)
@@ -439,13 +439,13 @@ config in [grafana/provisioning/](grafana/provisioning/)) and shows:
 Send some traffic and refresh the dashboard to see the panels move:
 
 ```bash
-for i in $(seq 1 20); do curl -s -o /dev/null -X POST http://localhost:8080/service-a/greet-service-b; done
+for i in $(seq 1 20); do curl -s -o /dev/null -X POST http://localhost:8080/booking-service/request-ride; done
 ```
 
 ### Trace a request
 
 ```bash
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+curl -i -X POST http://localhost:8080/booking-service/request-ride \
   -H "X-Request-ID: demo-container-001" \
   -H "Content-Type: application/json"
 docker compose logs | grep demo-container-001
@@ -456,7 +456,7 @@ Expected: the same `request_id` appears in Service A (`request_received`, `reque
 
 ```bash
 docker compose stop service-b
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+curl -i -X POST http://localhost:8080/booking-service/request-ride \
   -H "X-Request-ID: fail-test-001" \
   -H "Content-Type: application/json"
 ```
@@ -467,14 +467,14 @@ HTTP/1.1 502 Bad Gateway
 ```
 Service A's logs record the failure:
 ```bash
-docker compose logs service-a | grep fail-test-001
+docker compose logs booking-service | grep fail-test-001
 ```
 Expected: a `request_failed` log entry with `"status":502`.
 
 Recover:
 ```bash
 docker compose start service-b
-curl -i -X POST http://localhost:8080/service-a/greet-service-b \
+curl -i -X POST http://localhost:8080/booking-service/request-ride \
   -H "X-Request-ID: recovery-test-001" \
   -H "Content-Type: application/json"
 ```
