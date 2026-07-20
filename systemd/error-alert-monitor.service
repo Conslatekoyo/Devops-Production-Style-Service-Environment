@@ -1,0 +1,20 @@
+[Unit]
+Description=Error Alert Monitor - Slack notifications for high error rates
+After=network.target service-a.service service-b.service service-c.service
+Wants=service-a.service service-b.service service-c.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/production-services
+ExecStart=/usr/bin/node scripts/error-alert-monitor.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/production-services/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=error-alert-monitor
+
+[Install]
+WantedBy=multi-user.target

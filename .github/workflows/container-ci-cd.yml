@@ -61,6 +61,8 @@ jobs:
     name: Verify Docker Compose stack
     runs-on: ubuntu-latest
     needs: verify
+    env:
+      SLACK_WEBHOOK_URL: https://hooks.slack.com/services/dummy/dummy/dummy
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

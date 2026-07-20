@@ -70,6 +70,28 @@ services:
       - frontend
     restart: unless-stopped
 
+  error-alert-monitor:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./scripts/error-alert-monitor.js:/app/error-alert-monitor.js:ro
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:?SLACK_WEBHOOK_URL is required}
+      SERVICES: booking-service=http://service-a:3001/metrics,driver-service=http://service-b:3002/metrics,tracking-service=http://service-c:3003/metrics
+      ERROR_THRESHOLD_PERCENT: 20
+      CHECK_INTERVAL_SECONDS: 60
+    command: ["node", "/app/error-alert-monitor.js"]
+    depends_on:
+      service-a:
+        condition: service_healthy
+      service-b:
+        condition: service_healthy
+      service-c:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: unless-stopped
+
 networks:
   frontend:
   backend:
