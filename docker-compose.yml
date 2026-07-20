@@ -14,7 +14,7 @@ services:
 
   booking-service:
     build:
-      context: ./services/service-a
+      context: ./services/booking-service
       dockerfile: ../Dockerfile
     environment:
       - PORT=3001
@@ -39,7 +39,7 @@ services:
 
   driver-service:
     build:
-      context: ./services/service-b
+      context: ./services/driver-service
       dockerfile: ../Dockerfile
     environment:
       - PORT=3002
@@ -61,7 +61,7 @@ services:
 
   tracking-service:
     build:
-      context: ./services/service-c
+      context: ./services/tracking-service
       dockerfile: ../Dockerfile
     environment:
       - PORT=3003
