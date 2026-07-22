@@ -1,0 +1,43 @@
+version: 0.2
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: eu-west-3
+    AWS_ACCOUNT_ID: "827478161993"
+    IMAGE_REPO_NAME: devops-g8-driver-service
+    CONTAINER_NAME: driver-service
+
+phases:
+  pre_build:
+    commands:
+      - echo "Logging in to Amazon ECR..."
+      - aws --version
+      - docker --version
+      - aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - COMMIT_SHA=$(echo "$CODEBUILD_RESOLVED_SOURCE_VERSION" | cut -c 1-7)
+      - IMAGE_URI="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$COMMIT_SHA"
+      - echo "Commit SHA:$COMMIT_SHA"
+      - echo "Image URI:$IMAGE_URI"
+
+  build:
+    commands:
+      - echo "Installing Driver Service dependencies..."
+      - cd services/driver-service
+      - npm ci
+      - echo "Running Driver Service tests..."
+      - npm test
+      - cd ../..
+      - echo "Building Driver Service Docker image..."
+      - docker build -f services/Dockerfile --build-arg PORT=3002 -t "$IMAGE_URI" ./services/driver-service
+
+  post_build:
+    commands:
+      - echo "Pushing Driver Service image to ECR..."
+      - docker push "$IMAGE_URI"
+      - echo "Creating imagedefinitions.json..."
+      - printf '[{"name":"%s","imageUri":"%s"}]' "$CONTAINER_NAME" "$IMAGE_URI" > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
