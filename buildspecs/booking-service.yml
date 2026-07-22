@@ -1,0 +1,20 @@
+version: 0.2
+phases:
+  pre_build:
+    commands:
+      - echo Logging into ECR...
+      - aws ecr get-login-password --region eu-west-3 | docker login --username AWS --password-stdin 827478161993.dkr.ecr.eu-west-3.amazonaws.com
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c1-7)
+  build:
+    commands:
+      - echo Building booking-service image...
+      - docker build -f services/Dockerfile -t devops-g8-booking-service:$IMAGE_TAG services/booking-service
+      - docker tag devops-g8-booking-service:$IMAGE_TAG 827478161993.dkr.ecr.eu-west-3.amazonaws.com/devops-g8-booking-service:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Pushing image...
+      - docker push 827478161993.dkr.ecr.eu-west-3.amazonaws.com/devops-g8-booking-service:$IMAGE_TAG
+      - printf '[{"name":"booking-service","imageUri":"827478161993.dkr.ecr.eu-west-3.amazonaws.com/devops-g8-booking-service:%s"}]' $IMAGE_TAG > imagedefinitions.json
+artifacts:
+  files:
+    - imagedefinitions.json
