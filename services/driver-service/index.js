@@ -241,4 +241,41 @@ const server = app.listen(PORT, BIND_HOST, () => {
   log({ event: 'server_started', message: `${SERVICE_NAME} listening on ${BIND_HOST}:${PORT}`, port: PORT });
 });
 
+const shutdown = (signal) => {
+  log({
+    event: 'shutdown_started',
+    signal
+  });
+
+  server.close((error) => {
+    if (error) {
+      log({
+        event: 'shutdown_failed',
+        signal,
+        error: error.message
+      });
+      process.exit(1);
+    }
+
+    log({
+      event: 'shutdown_completed',
+      signal
+    });
+
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    log({
+      event: 'shutdown_forced',
+      signal
+    });
+
+    process.exit(1);
+  }, 10000).unref();
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 module.exports = server;
