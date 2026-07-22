@@ -70,7 +70,7 @@ app.use((req, res, next) => {
 });
 
 // Advanced health check - verifies driver-service is reachable
-app.get('/health', async (req, res) => {
+app.get('/health-broken', async (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
   let driverServiceStatus = 'ok';
 
