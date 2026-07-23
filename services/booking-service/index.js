@@ -1,8 +1,10 @@
+cat > services/booking-service/index.js << 'IDXEOF'
 'use strict';
 require('./tracer');
 
 const express = require('express');
 const crypto = require('crypto');
+const { DynamoDBClient, PutItemCommand, GetItemCommand, UpdateItemCommand, DeleteItemCommand } = require('@aws-sdk/client-dynamodb');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -10,9 +12,72 @@ const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const SERVICE_NAME = 'booking-service';
 const DRIVER_SERVICE_URL = process.env.SERVICE_B_URL || 'http://service-b.internal:3002';
 
-const pendingCallbacks = new Map();
+// Pending-ride state now lives in DynamoDB, not in an in-memory Map.
+// Reason: booking-service runs multiple replicas (desired count 2+). An
+// in-memory Map is private to whichever replica happens to receive the
+// request. If tracking-service's confirmation callback lands on a
+// *different* replica (which it will, roughly half the time, since
+// Service Connect load-balances across all healthy tasks), that replica
+// has no record of the ride and the original request times out even
+// though the confirmation genuinely arrived. Moving this to a shared
+// table means it doesn't matter which replica gets the callback -
+// whichever replica originally received /request-ride polls the same
+// shared record and picks up the answer regardless of who wrote it.
+const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'eu-west-3' });
+const PENDING_RIDES_TABLE = process.env.PENDING_RIDES_TABLE || 'devops-g8-pending-rides';
 const CALLBACK_TIMEOUT_MS = 10000;
+const CALLBACK_POLL_INTERVAL_MS = 300;
 const startTime = Date.now();
+
+async function createPendingRide(rideId) {
+  await ddb.send(new PutItemCommand({
+    TableName: PENDING_RIDES_TABLE,
+    Item: {
+      ride_id: { S: rideId },
+      status: { S: 'pending' },
+      created_at: { N: String(Date.now()) },
+      expires_at: { N: String(Math.floor(Date.now() / 1000) + 300) } // TTL, 5 min
+    }
+  }));
+}
+
+async function getRideStatus(rideId) {
+  const result = await ddb.send(new GetItemCommand({
+    TableName: PENDING_RIDES_TABLE,
+    Key: { ride_id: { S: rideId } }
+  }));
+  if (!result.Item) return null;
+  return {
+    status: result.Item.status.S,
+    driver: result.Item.driver?.S,
+    eta_minutes: result.Item.eta_minutes ? Number(result.Item.eta_minutes.N) : undefined
+  };
+}
+
+async function confirmRide(rideId, driver, etaMinutes) {
+  await ddb.send(new UpdateItemCommand({
+    TableName: PENDING_RIDES_TABLE,
+    Key: { ride_id: { S: rideId } },
+    UpdateExpression: 'SET #s = :confirmed, driver = :driver, eta_minutes = :eta',
+    ExpressionAttributeNames: { '#s': 'status' },
+    ExpressionAttributeValues: {
+      ':confirmed': { S: 'confirmed' },
+      ':driver': { S: driver || 'Brian' },
+      ':eta': { N: String(etaMinutes || 4) }
+    }
+  }));
+}
+
+async function deletePendingRide(rideId) {
+  await ddb.send(new DeleteItemCommand({
+    TableName: PENDING_RIDES_TABLE,
+    Key: { ride_id: { S: rideId } }
+  }));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const HISTOGRAM_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 
@@ -138,10 +203,6 @@ app.get('/metrics', (req, res) => {
   lines.push('# TYPE service_up gauge');
   lines.push(`service_up{service="${SERVICE_NAME}"} 1`);
 
-  lines.push('# HELP pending_rides Number of rides awaiting driver confirmation callback');
-  lines.push('# TYPE pending_rides gauge');
-  lines.push(`pending_rides{service="${SERVICE_NAME}"} ${pendingCallbacks.size}`);
-
   lines.push('# HELP service_uptime_seconds Seconds since service started');
   lines.push('# TYPE service_uptime_seconds counter');
   lines.push(`service_uptime_seconds{service="${SERVICE_NAME}"} ${Math.floor((Date.now() - startTime) / 1000)}`);
@@ -181,13 +242,12 @@ app.post('/request-ride', async (req, res) => {
     dropoff
   });
 
-  const callbackPromise = new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      pendingCallbacks.delete(rideId);
-      reject(new Error('callback_timeout'));
-    }, CALLBACK_TIMEOUT_MS);
-    pendingCallbacks.set(rideId, { resolve, timeout });
-  });
+  try {
+    await createPendingRide(rideId);
+  } catch (err) {
+    log({ event: 'pending_ride_write_failed', ride_id: rideId, status: 500, error: err.message });
+    return res.status(500).json({ ride_id: rideId, status: 'error', message: 'Internal error creating ride' });
+  }
 
   try {
     const response = await fetch(`${DRIVER_SERVICE_URL}/assign-driver`, {
@@ -201,38 +261,51 @@ app.post('/request-ride', async (req, res) => {
     await response.json();
     log({ event: 'driver_assignment_requested', ride_id: rideId, target: 'driver-service', status: response.status });
   } catch (err) {
-    const pending = pendingCallbacks.get(rideId);
-    if (pending) { clearTimeout(pending.timeout); pendingCallbacks.delete(rideId); }
+    await deletePendingRide(rideId).catch(() => {});
     log({ event: 'driver_assignment_failed', ride_id: rideId, status: 502, error: err.message });
     return res.status(502).json({ ride_id: rideId, status: 'error', message: 'Failed to reach driver-service' });
   }
 
-  try {
-    const callbackData = await callbackPromise;
+  // Poll the shared table instead of waiting on an in-memory Promise.
+  // This is what makes it not matter which booking-service replica
+  // receives the confirmation callback: this replica keeps checking the
+  // same shared record until it sees a status change, or the timeout
+  // elapses.
+  const deadline = Date.now() + CALLBACK_TIMEOUT_MS;
+  let ride = null;
+  while (Date.now() < deadline) {
+    ride = await getRideStatus(rideId).catch(() => null);
+    if (ride && ride.status === 'confirmed') break;
+    await sleep(CALLBACK_POLL_INTERVAL_MS);
+  }
+
+  if (ride && ride.status === 'confirmed') {
     log({
       event: 'ride_confirmed',
       ride_id: rideId,
-      driver: callbackData.driver,
-      eta_minutes: callbackData.eta_minutes,
+      driver: ride.driver,
+      eta_minutes: ride.eta_minutes,
       status: 200
     });
+    await deletePendingRide(rideId).catch(() => {});
     res.json({
       ride_id: rideId,
       status: 'confirmed',
       message: 'Driver on the way',
-      driver: callbackData.driver || 'Brian',
-      eta_minutes: callbackData.eta_minutes || 4,
+      driver: ride.driver || 'Brian',
+      eta_minutes: ride.eta_minutes || 4,
       pickup,
       dropoff
     });
-  } catch (err) {
-    log({ event: 'ride_confirmation_timeout', ride_id: rideId, status: 504, error: err.message });
+  } else {
+    log({ event: 'ride_confirmation_timeout', ride_id: rideId, status: 504, error: 'callback_timeout' });
+    await deletePendingRide(rideId).catch(() => {});
     res.status(504).json({ ride_id: rideId, status: 'error', message: 'No drivers available — please try again' });
   }
 });
 
 // Callback from tracking-service confirming ride is active
-app.post('/ride-confirmed', (req, res) => {
+app.post('/ride-confirmed', async (req, res) => {
   const body = req.body;
   const rideId = body.ride_id || req.headers['x-request-id'] || 'none';
   log({
@@ -245,11 +318,14 @@ app.post('/ride-confirmed', (req, res) => {
     status: 200,
     client_ip: clientIp(req)
   });
-  const pending = pendingCallbacks.get(rideId);
-  if (pending) {
-    clearTimeout(pending.timeout);
-    pendingCallbacks.delete(rideId);
-    pending.resolve(body);
+  // Write the confirmation to the shared table. It genuinely does not
+  // matter which replica handles this request - whichever replica
+  // originally received /request-ride is polling this same shared
+  // record and will pick up the change on its own.
+  try {
+    await confirmRide(rideId, body.driver, body.eta_minutes);
+  } catch (err) {
+    log({ event: 'ride_confirmation_write_failed', ride_id: rideId, error: err.message });
   }
   res.json({ status: 'received' });
 });
@@ -265,3 +341,4 @@ const server = app.listen(PORT, BIND_HOST, () => {
 });
 
 module.exports = server;
+IDXEOF
