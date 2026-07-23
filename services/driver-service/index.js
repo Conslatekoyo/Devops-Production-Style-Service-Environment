@@ -76,6 +76,13 @@ app.use((req, res, next) => {
 
 // Advanced health check - verifies tracking-service is reachable
 app.get('/health', async (req, res) => {
+  // Intentional failure for ECS automatic rollback demonstration
+  return res.status(500).json({
+    service: SERVICE_NAME,
+    status: 'unhealthy',
+    message: 'Intentional rollback test failure'
+  });
+
   const requestId = req.headers['x-request-id'] || 'none';
   let trackingServiceStatus = 'ok';
 
