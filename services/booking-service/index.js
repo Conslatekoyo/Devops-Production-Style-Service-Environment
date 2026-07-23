@@ -1,4 +1,3 @@
-cat > services/booking-service/index.js << 'IDXEOF'
 'use strict';
 require('./tracer');
 
