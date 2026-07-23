@@ -340,4 +340,3 @@ const server = app.listen(PORT, BIND_HOST, () => {
 });
 
 module.exports = server;
-IDXEOF
