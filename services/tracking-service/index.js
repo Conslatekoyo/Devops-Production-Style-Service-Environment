@@ -71,6 +71,21 @@ app.use((req, res, next) => {
 
 // Tracking-service has no downstream dependencies - always healthy
 app.get('/health', (req, res) => {
+   if (process.env.BREAK_HEALTH === 'true') {
+    return res.status(500).json({
+      status: 'unhealthy'
+    });
+  }
+
+  return res.json({
+    service: SERVICE_NAME,
+    status: 'healthy',
+    port: PORT,
+    message: `${SERVICE_NAME} listening on ${PORT}`,
+    active_rides: activeRides.size,
+    dependencies: {}
+  });
+});
   const requestId = req.headers['x-request-id'] || 'none';
   log({
     event: 'health_check',
