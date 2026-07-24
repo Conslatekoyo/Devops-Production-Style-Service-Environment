@@ -70,7 +70,7 @@ app.use((req, res, next) => {
 });
 
 // Tracking-service has no downstream dependencies - always healthy
-app.get('/health-broken', (req, res) => {
+app.get('/health', (req, res) => {
   const requestId = req.headers['x-request-id'] || 'none';
   log({
     event: 'health_check',
