@@ -1,0 +1,35 @@
+{
+  "family": "devops-g8-tracking-service-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::827478161993:role/devops-g8-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::827478161993:role/devops-g8-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "tracking-service",
+      "image": "827478161993.dkr.ecr.eu-west-3.amazonaws.com/devops-g8-tracking-service:2670f56",
+      "essential": true,
+      "portMappings": [
+        { "name": "tracking-service", "containerPort": 3003, "protocol": "tcp", "appProtocol": "http" }
+      ],
+      "environment": [
+        { "name": "PORT", "value": "3003" },
+        { "name": "BIND_HOST", "value": "0.0.0.0" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/devops-g8-tracking-service",
+          "awslogs-region": "eu-west-3",
+          "awslogs-stream-prefix": "tracking-service"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "node -e \"fetch('http://localhost:3003/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))\""],
+        "interval": 10, "timeout": 3, "retries": 5, "startPeriod": 10
+      }
+    }
+  ]
+}
