@@ -54,6 +54,84 @@ Three internal HTTP services orchestrated with Nginx, systemd, and Linux network
 
 Only ports 80 and 22 are externally accessible.
 
+## AWS Deployment (Production)
+
+The production environment is deployed to AWS using a fully automated CI/CD pipeline.
+
+```
+Developer
+    │
+git push / merge to main
+    │
+GitHub
+    │
+AWS CodePipeline
+    ├── Source   (GitHub via CodeConnections)
+    ├── Build    (AWS CodeBuild)
+    │       ├── runs test suite
+    │       ├── builds Docker image
+    │       ├── tags image with Git commit SHA  (e.g. devops-g8-driver-service:2670f56)
+    │       ├── pushes to Amazon ECR
+    │       └── generates imagedefinitions.json
+    └── Deploy   (ECS rolling deployment)
+            │
+    Amazon ECS (Fargate)
+            │
+    Application Load Balancer (:80)
+            │
+         Client
+```
+
+**ECR repositories:**
+
+| Service | Repository |
+|---------|------------|
+| booking-service | `devops-g8-booking-service` |
+| driver-service | `devops-g8-driver-service` |
+| tracking-service | `devops-g8-tracking-service` |
+
+**Image tagging:** every build tags the image with the Git commit SHA rather than `latest`. This makes every deployment traceable and rollbacks deterministic -- you always know exactly which commit is running.
+
+```
+devops-g8-driver-service:2670f56   ✓ traceable
+devops-g8-driver-service:latest    ✗ ambiguous
+```
+
+**Task definition revisions:** every successful deployment registers a new ECS task definition revision automatically. The ECS deploy action updates the service to the new revision; the previous revision remains available for rollback.
+
+```
+booking-service:  revision 8  → revision 9
+driver-service:   revision 14 → revision 15
+tracking-service: revision 10 → revision 11
+```
+
+**Deployment Circuit Breaker:** ECS Deployment Circuit Breaker is enabled on each service. If newly deployed tasks repeatedly fail their health checks, ECS automatically rolls back to the previous healthy task definition revision without manual intervention.
+
+**Service Connect (internal networking):** driver-service and tracking-service are not exposed through the ALB. They communicate internally via ECS Service Connect using the `group8.internal` namespace. Services reference each other by FQDN (e.g. `http://tracking-service.group8.internal:3003`) -- the Service Connect sidecar resolves these names without any external DNS.
+
+| Service | External | Internal hostname |
+|---------|----------|-------------------|
+| booking-service | via ALB at `/booking-service/*` | `booking-service.group8.internal:3001` |
+| driver-service | not exposed | `driver-service.group8.internal:3002` |
+| tracking-service | not exposed | `tracking-service.group8.internal:3003` |
+
+**ALB endpoint:**
+```
+http://devops-g8-alb-1127437633.eu-west-3.elb.amazonaws.com
+```
+
+**Verify the deployment:**
+```bash
+# Health check through ALB
+curl http://devops-g8-alb-1127437633.eu-west-3.elb.amazonaws.com/booking-service/health
+
+# Full request flow
+curl -X POST http://devops-g8-alb-1127437633.eu-west-3.elb.amazonaws.com/booking-service/request-ride \
+  -H "Content-Type: application/json"
+```
+
+---
+
 ## Request Flow
 
 1. Client -> `GET /service-a/greet-service-b` -> Nginx (:80)
