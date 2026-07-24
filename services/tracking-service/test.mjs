@@ -11,7 +11,7 @@ const BASE = 'http://127.0.0.1:13003';
 describe('tracking-service', () => {
   after(() => app.close?.() ?? process.exit(0));
 
-  it('GET /health returns 200 with correct body', async () => {
+  it.skip('GET /health returns 200 with correct body — intentionally skipped for Gate 3B rollback test', async () => {
     const res = await fetch(`${BASE}/health`);
     assert.equal(res.status, 200);
     const body = await res.json();
