@@ -1,3 +1,9 @@
 
 # Replace with a Git SHA that has already been built and pushed to Driver ECR.
 driver_image_tag = "abcdef1"
+
+# Replace with a Git SHA that has already been built and pushed to Tracking ECR.
+tracking_image_tag = "abcdef1"
+
+# Replace with a Git SHA that has already been built and pushed to Booking ECR.
+booking_image_tag = "abcdef1"

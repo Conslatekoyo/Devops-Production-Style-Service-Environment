@@ -162,3 +162,33 @@ output "driver_service_name" {
   description = "Name of the Driver ECS service."
   value       = module.driver_service.service_name
 }
+
+output "tracking_service_arn" {
+  description = "ARN of the Tracking ECS service."
+  value       = module.tracking_service.service_arn
+}
+
+output "tracking_task_definition_arn" {
+  description = "ARN of the Tracking task definition."
+  value       = module.tracking_service.task_definition_arn
+}
+
+output "tracking_service_name" {
+  description = "Name of the Tracking ECS service."
+  value       = module.tracking_service.service_name
+}
+
+output "booking_service_arn" {
+  description = "ARN of the Booking ECS service."
+  value       = module.booking_service.service_arn
+}
+
+output "booking_task_definition_arn" {
+  description = "ARN of the Booking task definition."
+  value       = module.booking_service.task_definition_arn
+}
+
+output "booking_service_name" {
+  description = "Name of the Booking ECS service."
+  value       = module.booking_service.service_name
+}
