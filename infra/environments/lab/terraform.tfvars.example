@@ -1,0 +1,3 @@
+
+# Replace with a Git SHA that has already been built and pushed to Driver ECR.
+driver_image_tag = "abcdef1"

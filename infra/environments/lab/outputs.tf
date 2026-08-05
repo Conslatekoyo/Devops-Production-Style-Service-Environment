@@ -147,3 +147,18 @@ output "booking_table_arn" {
   description = "ARN of the Booking pending-rides DynamoDB table."
   value       = module.workloads.booking_table_arn
 }
+
+output "driver_service_arn" {
+  description = "ARN of the Driver ECS service."
+  value       = module.driver_service.service_arn
+}
+
+output "driver_task_definition_arn" {
+  description = "ARN of the Driver task definition."
+  value       = module.driver_service.task_definition_arn
+}
+
+output "driver_service_name" {
+  description = "Name of the Driver ECS service."
+  value       = module.driver_service.service_name
+}
