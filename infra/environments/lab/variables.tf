@@ -113,3 +113,23 @@ variable "driver_image_tag" {
     error_message = "driver_image_tag must be a 7-40 character lowercase hexadecimal Git commit SHA."
   }
 }
+
+variable "tracking_image_tag" {
+  type        = string
+  description = "Immutable Git commit SHA used for the Tracking service container image."
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{7,40}$", var.tracking_image_tag))
+    error_message = "tracking_image_tag must be a 7-40 character lowercase hexadecimal Git commit SHA."
+  }
+}
+
+variable "booking_image_tag" {
+  type        = string
+  description = "Immutable Git commit SHA used for the Booking service container image."
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{7,40}$", var.booking_image_tag))
+    error_message = "booking_image_tag must be a 7-40 character lowercase hexadecimal Git commit SHA."
+  }
+}

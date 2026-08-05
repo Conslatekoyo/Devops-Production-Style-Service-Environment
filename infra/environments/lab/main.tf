@@ -93,3 +93,75 @@ module "driver_service" {
   memory = 512
   tags   = var.tags
 }
+
+module "tracking_service" {
+  source = "../../modules/ecs-service"
+
+  service_name   = "devops-g8-tracking-service"
+  container_port = 3003
+  desired_count  = 1
+
+  register_with_alb    = false
+  alb_target_group_arn = null
+
+  image_repo_url = module.workloads.ecr_repository_urls["tracking-service"]
+  image_tag      = var.tracking_image_tag
+
+  health_check_path = "/health"
+
+  cluster_arn        = module.ecs_platform.cluster_arn
+  namespace_arn      = module.ecs_platform.service_connect_namespace_arn
+  execution_role_arn = module.iam.execution_role_arn
+  task_role_arn      = module.iam.tracking_task_role_arn
+
+  private_subnet_ids = module.network.private_subnet_ids
+  security_group_id  = module.security.tracking_security_group_id
+  log_group_name     = module.workloads.log_group_names["tracking-service"]
+
+  environment_variables = {
+    PORT          = "3003"
+    BIND_HOST     = "0.0.0.0"
+    SERVICE_A_URL = "http://booking-service:3001"
+  }
+
+  cpu    = 256
+  memory = 512
+  tags   = var.tags
+}
+
+module "booking_service" {
+  source = "../../modules/ecs-service"
+
+  service_name   = "devops-g8-booking-service"
+  container_port = 3001
+  desired_count  = 2
+
+  register_with_alb    = true
+  alb_target_group_arn = module.alb.booking_target_group_arn
+
+  image_repo_url = module.workloads.ecr_repository_urls["booking-service"]
+  image_tag      = var.booking_image_tag
+
+  health_check_path = "/health"
+
+  cluster_arn        = module.ecs_platform.cluster_arn
+  namespace_arn      = module.ecs_platform.service_connect_namespace_arn
+  execution_role_arn = module.iam.execution_role_arn
+  task_role_arn      = module.iam.booking_task_role_arn
+
+  private_subnet_ids = module.network.private_subnet_ids
+  security_group_id  = module.security.booking_security_group_id
+  log_group_name     = module.workloads.log_group_names["booking-service"]
+
+  environment_variables = {
+    PORT                = "3001"
+    BIND_HOST           = "0.0.0.0"
+    SERVICE_B_URL       = "http://driver-service:3002"
+    AWS_REGION          = var.aws_region
+    PENDING_RIDES_TABLE = module.workloads.booking_table_name
+  }
+
+  cpu    = 256
+  memory = 512
+  tags   = var.tags
+}
