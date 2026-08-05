@@ -103,3 +103,13 @@ variable "tags" {
     error_message = "tags must include Project, Group, Environment, ManagedBy and Owner."
   }
 }
+
+variable "driver_image_tag" {
+  type        = string
+  description = "Immutable Git commit SHA used for the Driver service container image."
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{7,40}$", var.driver_image_tag))
+    error_message = "driver_image_tag must be a 7-40 character lowercase hexadecimal Git commit SHA."
+  }
+}

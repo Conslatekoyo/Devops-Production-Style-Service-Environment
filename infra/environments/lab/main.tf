@@ -58,3 +58,38 @@ module "workloads" {
   name_prefix = var.name_prefix
   tags        = var.tags
 }
+
+module "driver_service" {
+  source = "../../modules/ecs-service"
+
+  service_name   = "devops-g8-driver-service"
+  container_port = 3002
+  desired_count  = 1
+
+  register_with_alb    = false
+  alb_target_group_arn = null
+
+  image_repo_url = module.workloads.ecr_repository_urls["driver-service"]
+  image_tag      = var.driver_image_tag
+
+  health_check_path = "/health"
+
+  cluster_arn        = module.ecs_platform.cluster_arn
+  namespace_arn      = module.ecs_platform.service_connect_namespace_arn
+  execution_role_arn = module.iam.execution_role_arn
+  task_role_arn      = module.iam.driver_task_role_arn
+
+  private_subnet_ids = module.network.private_subnet_ids
+  security_group_id  = module.security.driver_security_group_id
+  log_group_name     = module.workloads.log_group_names["driver-service"]
+
+  environment_variables = {
+    PORT          = "3002"
+    BIND_HOST     = "0.0.0.0"
+    SERVICE_C_URL = "http://tracking-service:3003"
+  }
+
+  cpu    = 256
+  memory = 512
+  tags   = var.tags
+}
