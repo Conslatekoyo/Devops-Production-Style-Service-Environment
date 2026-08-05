@@ -7,15 +7,37 @@
 
 variable "service_name" {
   type        = string
-  description = "e.g. devops-g8-booking-service"
+  description = "Fully qualified Group 8 service name."
+
+  validation {
+    condition = contains([
+      "devops-g8-booking-service",
+      "devops-g8-driver-service",
+      "devops-g8-tracking-service"
+    ], var.service_name)
+
+    error_message = "service_name must be one of the approved Group 8 service names."
+  }
 }
 
 variable "container_port" {
-  type = number
+  type        = number
+  description = "Container port exposed by the service."
+
+  validation {
+    condition     = contains([3001, 3002, 3003], var.container_port)
+    error_message = "container_port must be 3001, 3002 or 3003."
+  }
 }
 
 variable "desired_count" {
-  type = number
+  type        = number
+  description = "Number of Fargate tasks maintained by the ECS service."
+
+  validation {
+    condition     = var.desired_count >= 1
+    error_message = "desired_count must be at least 1."
+  }
 }
 
 variable "register_with_alb" {
@@ -35,17 +57,23 @@ variable "image_repo_url" {
 
 variable "image_tag" {
   type        = string
-  description = "Immutable Git commit SHA — validated by the caller, never 'latest' here too as a second line of defense"
+  description = "Immutable 7-40 character lowercase hexadecimal Git commit SHA."
 
   validation {
-    condition     = var.image_tag != "latest"
-    error_message = "image_tag must be an immutable Git SHA, not 'latest'."
+    condition     = can(regex("^[0-9a-f]{7,40}$", var.image_tag))
+    error_message = "image_tag must be a 7-40 character lowercase hexadecimal Git commit SHA."
   }
 }
 
 variable "health_check_path" {
-  type    = string
-  default = "/health"
+  type        = string
+  description = "Container health-check endpoint."
+  default     = "/health"
+
+  validation {
+    condition     = startswith(var.health_check_path, "/")
+    error_message = "health_check_path must begin with /."
+  }
 }
 
 variable "cluster_arn" {
@@ -97,8 +125,20 @@ variable "memory" {
 }
 
 variable "tags" {
-  type    = map(string)
-  default = {}
+  type        = map(string)
+  description = "Required tags applied to the task definition and ECS service."
+
+  validation {
+    condition = alltrue([
+      contains(keys(var.tags), "Project"),
+      contains(keys(var.tags), "Group"),
+      contains(keys(var.tags), "Environment"),
+      contains(keys(var.tags), "ManagedBy"),
+      contains(keys(var.tags), "Owner")
+    ])
+
+    error_message = "tags must include Project, Group, Environment, ManagedBy and Owner."
+  }
 }
 
 ############################################
@@ -135,7 +175,7 @@ resource "aws_ecs_task_definition" "this" {
         logDriver = "awslogs"
         options = {
           "awslogs-group"         = var.log_group_name
-          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-region"        = data.aws_region.current.region
           "awslogs-stream-prefix" = var.service_name
         }
       }
@@ -210,6 +250,15 @@ resource "aws_ecs_service" "this" {
     precondition {
       condition     = var.register_with_alb == false || var.alb_target_group_arn != null
       error_message = "register_with_alb is true but no alb_target_group_arn was provided."
+    }
+
+    precondition {
+      condition = (
+        var.register_with_alb == false ||
+        var.service_name == "devops-g8-booking-service"
+      )
+
+      error_message = "Only devops-g8-booking-service may register with the Application Load Balancer."
     }
   }
 

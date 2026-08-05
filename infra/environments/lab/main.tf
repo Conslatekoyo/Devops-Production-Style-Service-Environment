@@ -25,9 +25,10 @@ module "ecs_platform" {
 module "iam" {
   source = "../../modules/iam"
 
-  name_prefix            = var.name_prefix
-  ecs_exec_log_group_arn = module.ecs_platform.ecs_exec_log_group_arn
-  tags                   = var.tags
+  name_prefix                = var.name_prefix
+  ecs_exec_log_group_arn     = module.ecs_platform.ecs_exec_log_group_arn
+  booking_dynamodb_table_arn = module.workloads.booking_table_arn
+  tags                       = var.tags
 }
 
 module "security" {
@@ -49,4 +50,11 @@ module "alb" {
   health_check_path     = "/health"
   target_type           = "ip"
   tags                  = var.tags
+}
+
+module "workloads" {
+  source = "../../modules/workloads"
+
+  name_prefix = var.name_prefix
+  tags        = var.tags
 }

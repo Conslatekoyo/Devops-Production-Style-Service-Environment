@@ -127,3 +127,23 @@ output "tracking_security_group_id" {
   description = "ID of the Tracking service security group."
   value       = module.security.tracking_security_group_id
 }
+
+output "ecr_repository_urls" {
+  description = "Map of service names to ECR repository URLs."
+  value       = module.workloads.ecr_repository_urls
+}
+
+output "service_log_group_names" {
+  description = "Map of service names to CloudWatch log group names."
+  value       = module.workloads.log_group_names
+}
+
+output "booking_table_name" {
+  description = "Name of the Booking pending-rides DynamoDB table."
+  value       = module.workloads.booking_table_name
+}
+
+output "booking_table_arn" {
+  description = "ARN of the Booking pending-rides DynamoDB table."
+  value       = module.workloads.booking_table_arn
+}

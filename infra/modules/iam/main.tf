@@ -138,3 +138,52 @@ resource "aws_iam_role_policy_attachment" "tracking_ecs_exec" {
   role       = aws_iam_role.tracking_task.name
   policy_arn = aws_iam_policy.ecs_exec.arn
 }
+
+############################################
+# Booking-only DynamoDB permissions
+############################################
+
+data "aws_iam_policy_document" "booking_dynamodb" {
+  count = var.booking_dynamodb_table_arn == null ? 0 : 1
+
+  statement {
+    sid    = "BookingPendingRidesTableAccess"
+    effect = "Allow"
+
+    actions = [
+      "dynamodb:DeleteItem",
+      "dynamodb:DescribeTable",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+      "dynamodb:UpdateItem"
+    ]
+
+    resources = [
+      var.booking_dynamodb_table_arn
+    ]
+  }
+}
+
+resource "aws_iam_policy" "booking_dynamodb" {
+  count = var.booking_dynamodb_table_arn == null ? 0 : 1
+
+  name        = "${var.name_prefix}-booking-dynamodb-policy"
+  description = "Allows only Booking service to use the pending-rides DynamoDB table."
+  policy      = data.aws_iam_policy_document.booking_dynamodb[0].json
+
+  tags = merge(
+    var.tags,
+    {
+      Name  = "${var.name_prefix}-booking-dynamodb-policy"
+      Owner = "booking-service-owner"
+    }
+  )
+}
+
+resource "aws_iam_role_policy_attachment" "booking_dynamodb" {
+  count = var.booking_dynamodb_table_arn == null ? 0 : 1
+
+  role       = aws_iam_role.booking_task.name
+  policy_arn = aws_iam_policy.booking_dynamodb[0].arn
+}
