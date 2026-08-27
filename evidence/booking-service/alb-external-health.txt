@@ -1,0 +1,23 @@
+* Host devops-g8-alb-1566487128.eu-west-3.elb.amazonaws.com:80 was resolved.
+* IPv6: (none)
+* IPv4: 13.37.20.192, 13.37.19.184
+*   Trying 13.37.20.192:80...
+* Connected to devops-g8-alb-1566487128.eu-west-3.elb.amazonaws.com (13.37.20.192) port 80
+> GET /health HTTP/1.1
+> Host: devops-g8-alb-1566487128.eu-west-3.elb.amazonaws.com
+> User-Agent: curl/8.5.0
+> Accept: */*
+> 
+< HTTP/1.1 200 OK
+< Date: Thu, 27 Aug 2026 20:03:35 GMT
+< Content-Type: application/json; charset=utf-8
+< Content-Length: 147
+< Connection: keep-alive
+< x-powered-by: Express
+< etag: W/"93-48w5jsDBnNxFGQp30AylxcIclnM"
+< x-envoy-upstream-service-time: 11
+< server: envoy
+< 
+{ [147 bytes data]
+* Connection #0 to host devops-g8-alb-1566487128.eu-west-3.elb.amazonaws.com left intact
+{"service":"booking-service","status":"healthy","port":"3001","message":"booking-service listening on 3001","dependencies":{"driver-service":"ok"}}
