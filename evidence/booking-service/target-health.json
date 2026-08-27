@@ -1,0 +1,36 @@
+{
+    "TargetHealthDescriptions": [
+        {
+            "Target": {
+                "Id": "10.8.11.158",
+                "Port": 3001,
+                "AvailabilityZone": "eu-west-3b"
+            },
+            "HealthCheckPort": "3001",
+            "TargetHealth": {
+                "State": "healthy"
+            },
+            "AdministrativeOverride": {
+                "State": "no_override",
+                "Reason": "AdministrativeOverride.NoOverride",
+                "Description": "No override is currently active on target"
+            }
+        },
+        {
+            "Target": {
+                "Id": "10.8.10.41",
+                "Port": 3001,
+                "AvailabilityZone": "eu-west-3a"
+            },
+            "HealthCheckPort": "3001",
+            "TargetHealth": {
+                "State": "healthy"
+            },
+            "AdministrativeOverride": {
+                "State": "no_override",
+                "Reason": "AdministrativeOverride.NoOverride",
+                "Description": "No override is currently active on target"
+            }
+        }
+    ]
+}

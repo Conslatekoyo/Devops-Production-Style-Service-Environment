@@ -1,0 +1,200 @@
+{
+    "services": [
+        {
+            "serviceArn": "arn:aws:ecs:eu-west-3:240462142849:service/devops-g8-cluster/devops-g8-booking-service",
+            "serviceName": "devops-g8-booking-service",
+            "clusterArn": "arn:aws:ecs:eu-west-3:240462142849:cluster/devops-g8-cluster",
+            "loadBalancers": [
+                {
+                    "targetGroupArn": "arn:aws:elasticloadbalancing:eu-west-3:240462142849:targetgroup/devops-g8-booking-tg/202ffd121f8652a1",
+                    "containerName": "devops-g8-booking-service",
+                    "containerPort": 3001
+                }
+            ],
+            "serviceRegistries": [],
+            "status": "ACTIVE",
+            "desiredCount": 2,
+            "runningCount": 2,
+            "pendingCount": 0,
+            "launchType": "FARGATE",
+            "platformVersion": "LATEST",
+            "platformFamily": "Linux",
+            "taskDefinition": "arn:aws:ecs:eu-west-3:240462142849:task-definition/devops-g8-booking-service-task:1",
+            "deploymentConfiguration": {
+                "deploymentCircuitBreaker": {
+                    "enable": true,
+                    "rollback": true,
+                    "resetOnHealthyTask": true,
+                    "thresholdConfiguration": {
+                        "type": "BOUNDED_PERCENT",
+                        "value": 50
+                    }
+                },
+                "maximumPercent": 200,
+                "minimumHealthyPercent": 100,
+                "strategy": "ROLLING",
+                "bakeTimeInMinutes": 0
+            },
+            "deployments": [
+                {
+                    "id": "ecs-svc/5127137495287086712",
+                    "status": "PRIMARY",
+                    "taskDefinition": "arn:aws:ecs:eu-west-3:240462142849:task-definition/devops-g8-booking-service-task:1",
+                    "desiredCount": 2,
+                    "pendingCount": 0,
+                    "runningCount": 2,
+                    "failedTasks": 0,
+                    "createdAt": "2026-08-27T22:09:25.773000+03:00",
+                    "updatedAt": "2026-08-27T22:39:44.618000+03:00",
+                    "launchType": "FARGATE",
+                    "platformVersion": "1.4.0",
+                    "platformFamily": "Linux",
+                    "networkConfiguration": {
+                        "awsvpcConfiguration": {
+                            "subnets": [
+                                "subnet-03590f280f5190366",
+                                "subnet-04f6326cb1051d054"
+                            ],
+                            "securityGroups": [
+                                "sg-077c37ea47c7b93a4"
+                            ],
+                            "assignPublicIp": "DISABLED"
+                        }
+                    },
+                    "rolloutState": "COMPLETED",
+                    "rolloutStateReason": "ECS deployment ecs-svc/5127137495287086712 completed.",
+                    "serviceConnectConfiguration": {
+                        "enabled": true,
+                        "namespace": "arn:aws:servicediscovery:eu-west-3:240462142849:namespace/ns-4igrs2gq555cg3fc",
+                        "services": [
+                            {
+                                "portName": "devops-g8-booking-service",
+                                "discoveryName": "booking-service",
+                                "clientAliases": [
+                                    {
+                                        "port": 3001,
+                                        "dnsName": "booking-service"
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    "serviceConnectResources": [
+                        {
+                            "discoveryName": "booking-service",
+                            "discoveryArn": "arn:aws:servicediscovery:eu-west-3:240462142849:service/srv-eiptevifqvn3ld2s"
+                        }
+                    ]
+                }
+            ],
+            "roleArn": "arn:aws:iam::240462142849:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS",
+            "events": [
+                {
+                    "id": "b90827b5-56e6-48b5-b953-154258bd7606",
+                    "createdAt": "2026-08-27T22:39:44.623000+03:00",
+                    "message": "(service devops-g8-booking-service) has reached a steady state."
+                },
+                {
+                    "id": "fbc32654-8399-4704-9b7b-098578c75ccb",
+                    "createdAt": "2026-08-27T22:39:44.554000+03:00",
+                    "message": "(service devops-g8-booking-service, taskSet ecs-svc/5127137495287086712) has begun draining connections on 1 tasks."
+                },
+                {
+                    "id": "623e4ad1-0966-4bea-8ea3-55597d8195c1",
+                    "createdAt": "2026-08-27T22:39:44.548000+03:00",
+                    "message": "(service devops-g8-booking-service) deregistered 1 targets in (target-group arn:aws:elasticloadbalancing:eu-west-3:240462142849:targetgroup/devops-g8-booking-tg/202ffd121f8652a1)"
+                },
+                {
+                    "id": "b712ecff-3660-4db1-80b0-9bdc4f63f2d7",
+                    "createdAt": "2026-08-27T22:39:34.800000+03:00",
+                    "message": "(service devops-g8-booking-service) has stopped 1 running tasks: (task 9be4e0cd069f42cb906bdcf8d32d791e)."
+                },
+                {
+                    "id": "cd31f358-c5d2-46b1-aa6d-c69e600687bd",
+                    "createdAt": "2026-08-27T22:39:34.748000+03:00",
+                    "message": "(service devops-g8-booking-service, taskSet ecs-svc/5127137495287086712) has begun draining connections on 1 tasks."
+                },
+                {
+                    "id": "5136819e-ec02-4796-a3df-56c6b52b4790",
+                    "createdAt": "2026-08-27T22:39:34.742000+03:00",
+                    "message": "(service devops-g8-booking-service) deregistered 1 targets in (target-group arn:aws:elasticloadbalancing:eu-west-3:240462142849:targetgroup/devops-g8-booking-tg/202ffd121f8652a1)"
+                },
+                {
+                    "id": "09cd78b1-4b68-4a24-adcd-1f6d00d19911",
+                    "createdAt": "2026-08-27T22:39:24.752000+03:00",
+                    "message": "(service devops-g8-booking-service) has stopped 1 running tasks: (task 1cb9a4eaa5f84918a48c01cba1132b92)."
+                },
+                {
+                    "id": "ca3aa81f-54b0-49f8-8347-ae171789a85a",
+                    "createdAt": "2026-08-27T22:38:56.956000+03:00",
+                    "message": "(service devops-g8-booking-service) registered 2 targets in (target-group arn:aws:elasticloadbalancing:eu-west-3:240462142849:targetgroup/devops-g8-booking-tg/202ffd121f8652a1)"
+                },
+                {
+                    "id": "e8dad440-50cc-497c-98ea-7e62cbd646a1",
+                    "createdAt": "2026-08-27T22:38:19.997000+03:00",
+                    "message": "(service devops-g8-booking-service) has started 2 tasks: (task 9be4e0cd069f42cb906bdcf8d32d791e) (task b1a3f93187df43f6aedfaaeaf5ff955e). Amazon ECS replaced 2 tasks due to an unhealthy status."
+                },
+                {
+                    "id": "584e0f60-794f-40b8-8141-bcf9be113daf",
+                    "createdAt": "2026-08-27T22:11:47.637000+03:00",
+                    "message": "(service devops-g8-booking-service) has reached a steady state."
+                },
+                {
+                    "id": "3e8f7c2d-cb41-4990-b859-91ab1d9f3308",
+                    "createdAt": "2026-08-27T22:11:47.636000+03:00",
+                    "message": "(service devops-g8-booking-service) (deployment ecs-svc/5127137495287086712) deployment completed."
+                },
+                {
+                    "id": "16ff27f3-590e-4fd5-b85f-357385829ccd",
+                    "createdAt": "2026-08-27T22:10:47.159000+03:00",
+                    "message": "(service devops-g8-booking-service) registered 1 targets in (target-group arn:aws:elasticloadbalancing:eu-west-3:240462142849:targetgroup/devops-g8-booking-tg/202ffd121f8652a1)"
+                },
+                {
+                    "id": "df6b8402-ccf0-4333-a685-dea108674b02",
+                    "createdAt": "2026-08-27T22:10:28.006000+03:00",
+                    "message": "(service devops-g8-booking-service) has started 1 tasks: (task 1cb9a4eaa5f84918a48c01cba1132b92)."
+                },
+                {
+                    "id": "f46911d3-e15e-47e2-bc17-82722eb935e4",
+                    "createdAt": "2026-08-27T22:10:08.150000+03:00",
+                    "message": "(service devops-g8-booking-service) has started 1 tasks: (task 1d90acbc8b1445e8aa41fc8cc53eed40)."
+                }
+            ],
+            "createdAt": "2026-08-27T22:09:25.773000+03:00",
+            "currentServiceRevisions": [
+                {
+                    "arn": "arn:aws:ecs:eu-west-3:240462142849:service-revision/devops-g8-cluster/devops-g8-booking-service/5127137495287086712",
+                    "requestedTaskCount": 2,
+                    "runningTaskCount": 2,
+                    "pendingTaskCount": 0
+                }
+            ],
+            "placementConstraints": [],
+            "placementStrategy": [],
+            "networkConfiguration": {
+                "awsvpcConfiguration": {
+                    "subnets": [
+                        "subnet-03590f280f5190366",
+                        "subnet-04f6326cb1051d054"
+                    ],
+                    "securityGroups": [
+                        "sg-077c37ea47c7b93a4"
+                    ],
+                    "assignPublicIp": "DISABLED"
+                }
+            },
+            "healthCheckGracePeriodSeconds": 0,
+            "schedulingStrategy": "REPLICA",
+            "deploymentController": {
+                "type": "ECS"
+            },
+            "createdBy": "arn:aws:iam::240462142849:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_DevOpsCohort-group8-eu-west-3_64134726bb26e6d1",
+            "enableECSManagedTags": false,
+            "propagateTags": "NONE",
+            "enableExecuteCommand": true,
+            "availabilityZoneRebalancing": "ENABLED",
+            "resourceManagementType": "CUSTOMER"
+        }
+    ],
+    "failures": []
+}
