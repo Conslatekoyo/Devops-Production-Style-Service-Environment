@@ -17,3 +17,4 @@ override.tf.json
 
 # Local OS files
 .DS_Store
+infra/environments/lab/tfplan
