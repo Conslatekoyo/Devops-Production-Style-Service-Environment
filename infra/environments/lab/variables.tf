@@ -12,7 +12,7 @@ variable "aws_region" {
 variable "aws_account_id" {
   type        = string
   description = "Authorized classroom AWS account ID."
-  default     = "827478161993"
+  default     = "240462142849"
 
   validation {
     condition     = can(regex("^[0-9]{12}$", var.aws_account_id))

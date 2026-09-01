@@ -144,8 +144,6 @@ resource "aws_iam_role_policy_attachment" "tracking_ecs_exec" {
 ############################################
 
 data "aws_iam_policy_document" "booking_dynamodb" {
-  count = var.booking_dynamodb_table_arn == null ? 0 : 1
-
   statement {
     sid    = "BookingPendingRidesTableAccess"
     effect = "Allow"
@@ -166,11 +164,9 @@ data "aws_iam_policy_document" "booking_dynamodb" {
 }
 
 resource "aws_iam_policy" "booking_dynamodb" {
-  count = var.booking_dynamodb_table_arn == null ? 0 : 1
-
   name        = "${var.name_prefix}-booking-dynamodb-policy"
   description = "Allows only Booking service to use the pending-rides DynamoDB table."
-  policy      = data.aws_iam_policy_document.booking_dynamodb[0].json
+  policy      = data.aws_iam_policy_document.booking_dynamodb.json
 
   tags = merge(
     var.tags,
@@ -182,8 +178,6 @@ resource "aws_iam_policy" "booking_dynamodb" {
 }
 
 resource "aws_iam_role_policy_attachment" "booking_dynamodb" {
-  count = var.booking_dynamodb_table_arn == null ? 0 : 1
-
   role       = aws_iam_role.booking_task.name
-  policy_arn = aws_iam_policy.booking_dynamodb[0].arn
+  policy_arn = aws_iam_policy.booking_dynamodb.arn
 }
