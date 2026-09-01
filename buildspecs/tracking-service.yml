@@ -3,7 +3,7 @@ version: 0.2
 env:
   variables:
     AWS_DEFAULT_REGION: eu-west-3
-    AWS_ACCOUNT_ID: "827478161993"
+    AWS_ACCOUNT_ID: "240462142849"
     IMAGE_REPO_NAME: devops-g8-tracking-service
     CONTAINER_NAME: tracking-service
 

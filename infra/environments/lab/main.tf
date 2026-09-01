@@ -165,3 +165,27 @@ module "booking_service" {
   memory = 512
   tags   = var.tags
 }
+
+module "cicd" {
+  source = "../../modules/cicd"
+
+  name_prefix    = var.name_prefix
+  aws_region     = var.aws_region
+  aws_account_id = var.aws_account_id
+
+  github_owner  = "Conslatekoyo"
+  github_repo   = "Devops-Production-Style-Service-Environment"
+  github_branch = "main"
+
+  connection_arn = "arn:aws:codeconnections:eu-west-3:240462142849:connection/1fc881ad-de7f-4d37-b7a1-11e1bd1877b8"
+
+  artifact_bucket_name = "devops-g8-codepipeline-artifacts-240462142849"
+
+  cluster_name = "devops-g8-cluster"
+
+  booking_service_name  = "devops-g8-booking-service"
+  driver_service_name   = "devops-g8-driver-service"
+  tracking_service_name = "devops-g8-tracking-service"
+
+  tags = var.tags
+}

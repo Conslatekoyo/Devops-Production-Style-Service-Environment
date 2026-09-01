@@ -192,3 +192,15 @@ output "booking_service_name" {
   description = "Name of the Booking ECS service."
   value       = module.booking_service.service_name
 }
+
+output "cicd_artifact_bucket" {
+  value = module.cicd.artifact_bucket_name
+}
+
+output "cicd_codebuild_projects" {
+  value = module.cicd.codebuild_projects
+}
+
+output "cicd_pipelines" {
+  value = module.cicd.pipelines
+}
