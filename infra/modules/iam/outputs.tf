@@ -42,3 +42,8 @@ output "ecs_exec_policy_arn" {
   description = "ARN of the ECS Exec policy attached to all three task roles."
   value       = aws_iam_policy.ecs_exec.arn
 }
+
+output "github_actions_role_arn" {
+  description = "ARN of the IAM role GitHub Actions assumes via OIDC to push images to ECR."
+  value       = aws_iam_role.github_actions.arn
+}

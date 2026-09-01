@@ -181,3 +181,91 @@ resource "aws_iam_role_policy_attachment" "booking_dynamodb" {
   role       = aws_iam_role.booking_task.name
   policy_arn = aws_iam_policy.booking_dynamodb.arn
 }
+
+############################################
+# GitHub Actions CI/CD role (OIDC, no static keys)
+############################################
+
+data "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+}
+
+data "aws_iam_policy_document" "github_actions_assume_role" {
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [data.aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:${var.github_repository}:ref:refs/heads/main"]
+    }
+  }
+}
+
+resource "aws_iam_role" "github_actions" {
+  name               = var.github_actions_role_name
+  assume_role_policy = data.aws_iam_policy_document.github_actions_assume_role.json
+
+  tags = merge(
+    var.tags,
+    {
+      Name = var.github_actions_role_name
+    }
+  )
+}
+
+data "aws_iam_policy_document" "github_actions_ecr_push" {
+  statement {
+    sid       = "ECRAuth"
+    effect    = "Allow"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "ECRPushGroup8Repositories"
+    effect = "Allow"
+
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:GetDownloadUrlForLayer",
+      "ecr:BatchGetImage",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage"
+    ]
+
+    resources = var.ecr_repository_arns
+  }
+}
+
+resource "aws_iam_policy" "github_actions_ecr_push" {
+  name        = "${var.name_prefix}-github-actions-ecr-push-policy"
+  description = "Allows GitHub Actions to push Group 8 service images to ECR."
+  policy      = data.aws_iam_policy_document.github_actions_ecr_push.json
+
+  tags = merge(
+    var.tags,
+    {
+      Name = "${var.name_prefix}-github-actions-ecr-push-policy"
+    }
+  )
+}
+
+resource "aws_iam_role_policy_attachment" "github_actions_ecr_push" {
+  role       = aws_iam_role.github_actions.name
+  policy_arn = aws_iam_policy.github_actions_ecr_push.arn
+}
