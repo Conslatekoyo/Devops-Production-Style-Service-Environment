@@ -105,7 +105,7 @@ app.get('/health', async (req, res) => {
     service: SERVICE_NAME,
     status: overallStatus,
     port: PORT,
-    message: `${SERVICE_NAME} listening on ${PORT}`,
+    message: `${SERVICE_NAME} listening on ${PORT} - immutable release verified`,
     available_drivers: AVAILABLE_DRIVERS.length,
     dependencies: { 'tracking-service': trackingServiceStatus }
   });
