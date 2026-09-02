@@ -104,6 +104,12 @@ variable "tags" {
   }
 }
 
+variable "github_repository" {
+  type        = string
+  description = "GitHub repository authorized to assume the CI/CD role, as \"owner/repo\"."
+  default     = "Conslatekoyo/Devops-Production-Style-Service-Environment"
+}
+
 variable "driver_image_tag" {
   type        = string
   description = "Immutable Git commit SHA used for the Driver service container image."

@@ -28,6 +28,8 @@ module "iam" {
   name_prefix                = var.name_prefix
   ecs_exec_log_group_arn     = module.ecs_platform.ecs_exec_log_group_arn
   booking_dynamodb_table_arn = module.workloads.booking_table_arn
+  github_repository          = var.github_repository
+  ecr_repository_arns        = values(module.workloads.ecr_repository_arns)
   tags                       = var.tags
 }
 

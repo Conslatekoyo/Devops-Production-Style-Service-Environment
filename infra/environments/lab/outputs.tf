@@ -98,6 +98,11 @@ output "tracking_task_role_arn" {
   value       = module.iam.tracking_task_role_arn
 }
 
+output "github_actions_role_arn" {
+  description = "ARN of the IAM role GitHub Actions assumes via OIDC to push images to ECR."
+  value       = module.iam.github_actions_role_arn
+}
+
 output "alb_dns_name" {
   description = "Public DNS name of the Application Load Balancer."
   value       = module.alb.alb_dns_name

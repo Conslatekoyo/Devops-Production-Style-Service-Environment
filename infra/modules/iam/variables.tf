@@ -43,6 +43,27 @@ variable "ecs_exec_log_group_arn" {
   }
 }
 
+variable "github_repository" {
+  type        = string
+  description = "GitHub repository authorized to assume the CI/CD role, as \"owner/repo\"."
+
+  validation {
+    condition     = can(regex("^[^/]+/[^/]+$", var.github_repository))
+    error_message = "github_repository must be in the form \"owner/repo\"."
+  }
+}
+
+variable "github_actions_role_name" {
+  type        = string
+  description = "Name of the IAM role assumed by GitHub Actions to publish images to ECR."
+  default     = "devops-g8-github-actions-role"
+}
+
+variable "ecr_repository_arns" {
+  type        = list(string)
+  description = "ARNs of the Group 8 ECR repositories GitHub Actions is allowed to push to."
+}
+
 variable "booking_dynamodb_table_arn" {
   type        = string
   description = "ARN of the DynamoDB pending-rides table used only by Booking."
