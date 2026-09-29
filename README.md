@@ -55,32 +55,43 @@ Three internal HTTP services orchestrated with Nginx, systemd, and Linux network
 Only ports 80 and 22 are externally accessible.
 
 ## AWS Deployment (Production)
-
-The production environment is deployed to AWS using a fully automated CI/CD pipeline.
+The production environment is deployed to AWS via Terraform + GitHub Actions,
+with image publishing authenticated through OIDC (no long-lived AWS keys).
 
 ```
 Developer
-    │
+    |
 git push / merge to main
-    │
-GitHub
-    │
-AWS CodePipeline
-    ├── Source   (GitHub via CodeConnections)
-    ├── Build    (AWS CodeBuild)
-    │       ├── runs test suite
-    │       ├── builds Docker image
-    │       ├── tags image with Git commit SHA  (e.g. devops-g8-driver-service:2670f56)
-    │       ├── pushes to Amazon ECR
-    │       └── generates imagedefinitions.json
-    └── Deploy   (ECS rolling deployment)
-            │
-    Amazon ECS (Fargate)
-            │
-    Application Load Balancer (:80)
-            │
-         Client
+    |
+GitHub Actions (.github/workflows/container-ci-cd.yml)
+    |-- verify:   npm ci, tests, docker build (per service, matrix job)
+    |-- publish:  builds + pushes image to Docker Hub AND Amazon ECR
+    |               - authenticates to AWS via OIDC (aws-actions/configure-aws-credentials),
+    |                 assuming devops-g8-github-actions-role, scoped to this repo's main branch
+    |               - image tagged with the full Git commit SHA
+    |               (e.g. devops-g8-driver-service:2b7c972563c839a138b648c898a325e9ead354d2)
+    |
+Terraform (infra/environments/lab)
+    |-- terraform.tfvars sets the image tag per service (gitignored --
+    |     see docs/GATE3_OPERATE.md for why release state stays out of git)
+    |-- terraform plan / apply, run manually by a team member
+    |     -- registers a new ECS task-definition revision
+    |     -- updates the ECS service to the new revision (rolling deployment)
+    |
+Amazon ECS (Fargate)
+    |
+Application Load Balancer (:80)
+    |
+ Client
 ```
+
+**Known limitation:** an EventBridge rule exists to trigger deployment
+automatically on merge to `main`, but has recorded zero invocations despite
+correct rule/target/role configuration on the AWS side -- root cause appears
+to be on GitHub's event-delivery side and needs repo admin access to
+diagnose further (see `docs/SCAR_LOG.md`, open item). Deployment is
+currently a deliberate manual step (`terraform apply`), not fully automatic.
+
 
 **ECR repositories:**
 

@@ -1,6 +1,6 @@
 # Gate 1 — Draw the Graph
 
-**Group:** devops-g8 · **Region:** eu-west-3 · **Account:** 827478161993
+**Group:** devops-g8 · **Region:** eu-west-3 · **Account:** 240462142849
 **Team:** Glory (booking-service), Hawaah (driver-service, platform), Conslate (tracking-service)
 **Last updated:** 2026-07-23
 
